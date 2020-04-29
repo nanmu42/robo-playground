@@ -9,6 +9,7 @@ dependencies:
   - ca-certificates=2020.1.1=0
   - cairo=1.16.0=hcf35c78_1003
   - certifi=2020.4.5.1=py37_0
+  - click=7.1.1=py_0
   - dbus=1.13.6=he372182_0
   - expat=2.2.9=he1b5a44_2
   - ffmpeg=4.2=h167e202_0
