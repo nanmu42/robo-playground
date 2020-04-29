@@ -13,13 +13,13 @@ def detect_corners(frame, board, dictionary):
 
 
 @click.command()
-@click.argument('material', help='path to video containing ChAruco board')
+@click.argument('material')
 @click.option('--gap', help='use every frame_gap-th frame in the video', type=int, default=30)
 @click.option('--frame-num', help='how many frames to use in the video', type=int, default=30)
 @click.option('-x', help='number of markers in X direction', type=int, default=9)
 @click.option('-y', help='number of markers in Y direction', type=int, default=7)
-@click.option('--marker-length', help='number of markers in Y direction', type=int, default=0.07)
-@click.option('--square-length', help='number of markers in Y direction', type=int, default=0.09)
+@click.option('--marker-length', help='number of markers in Y direction', type=int, default=0.015)
+@click.option('--square-length', help='number of markers in Y direction', type=int, default=0.02)
 @click.option('-y', help='number of markers in Y direction', type=int, default=7)
 def main(material: str, gap: int, frame_num: int, x: int, y: int, marker_length: int, square_length: int):
     cap = cv.VideoCapture(material)
