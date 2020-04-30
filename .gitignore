@@ -133,3 +133,5 @@ dmypy.json
 
 # materials
 *.mp4
+*.png
+*.jpeg

@@ -1,3 +1,6 @@
+import glob
+import os
+
 import click
 import cv2 as cv
 import numpy as np
@@ -13,47 +16,33 @@ def detect_corners(frame, board, dictionary):
 
 
 @click.command()
-@click.argument('material')
-@click.option('--gap', help='use every frame_gap-th frame in the video', type=int, default=30)
-@click.option('--frame-num', help='how many frames to use in the video', type=int, default=30)
+@click.argument('folder')
 @click.option('-x', help='number of markers in X direction', type=int, default=9)
 @click.option('-y', help='number of markers in Y direction', type=int, default=7)
-@click.option('--marker-length', help='number of markers in Y direction', type=int, default=0.015)
-@click.option('--square-length', help='number of markers in Y direction', type=int, default=0.02)
+@click.option('--marker-length', help='number of markers in Y direction', type=float, default=0.015)
+@click.option('--square-length', help='number of markers in Y direction', type=float, default=0.02)
 @click.option('-y', help='number of markers in Y direction', type=int, default=7)
-def main(material: str, gap: int, frame_num: int, x: int, y: int, marker_length: int, square_length: int):
-    cap = cv.VideoCapture(material)
-    if not cap.isOpened():
-        raise click.Abort('openCV VideoCapture failed')
-
-    video_width = cap.get(cv.CAP_PROP_FRAME_WIDTH)
-    video_height = cap.get(cv.CAP_PROP_FRAME_HEIGHT)
-
-    dictionary = cv.aruco.DICT_APRILTAG_36h11
-    board = cv.aruco_CharucoBoard(x, y, square_length, marker_length, dictionary)
-    index: int = 0
-
+def main(folder: str, x: int, y: int, marker_length: int, square_length: int):
+    images = glob.glob(os.path.join(folder, '*.png'))
+    dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_APRILTAG_36h11)
+    board = cv.aruco.CharucoBoard_create(x, y, square_length, marker_length, dictionary)
     all_corners = []
     all_ids = []
-    while True:
-        index += 1
-        ok, frame = cap.read()
-        if not ok:
-            click.echo('video ends')
-            break
-        if index % gap != 0:
-            continue
+    frame = None
+    for image_path in images:
+        frame = cv.imread(image_path)
         charuco_corners, charuco_ids = detect_corners(frame, board, dictionary)
-        if charuco_corners is None:
+        if charuco_corners is None or len(charuco_corners) < 4:
             continue
-        all_corners += charuco_corners
-        all_ids += charuco_ids
-        if index // gap >= frame_num:
-            click.echo('enough frame num')
-    cap.release()
+        all_corners.append(charuco_corners)
+        all_ids.append(charuco_ids)
+    width = frame.shape[1]
+    height = frame.shape[0]
     click.echo('calibrating...')
-    camera_matrix = np.zeros((3,3))
-    retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv.aruco.calibrateCameraCharuco(all_corners, all_ids, board, (video_width, video_height), camera_matrix, None)
+    camera_matrix = np.zeros((3, 3))
+    retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv.aruco.calibrateCameraCharuco(all_corners, all_ids, board,
+                                                                                       (width, height), camera_matrix,
+                                                                                       None)
     click.echo('here it is:')
     click.echo(camera_matrix)
     click.echo(dist_coeffs)
