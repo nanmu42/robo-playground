@@ -45,10 +45,8 @@ def calc(folder: str, x: int, y: int, marker_length: int, square_length: int, ou
     width = frame.shape[1]
     height = frame.shape[0]
     click.echo(f'calibrating, based on {len(all_corners)} charuco corners.')
-    camera_matrix = np.zeros((3, 3))
-    retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv.aruco.calibrateCameraCharuco(all_corners, all_ids, board,
-                                                                                       (width, height), camera_matrix,
-                                                                                       None)
+    retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv.aruco.calibrateCameraCharuco(
+        all_corners, all_ids, board, (width, height), None, None)
     click.echo('Calibrated, camera_matrix and dist_coeffs:')
     click.echo(camera_matrix)
     click.echo(dist_coeffs)
