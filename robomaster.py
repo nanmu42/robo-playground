@@ -174,9 +174,19 @@ class Commander:
         buf = self._conn.recv(DEFAULT_BUF_SIZE)
         return buf.decode()
 
+    def get_ip(self) -> str:
+        """
+        返回机甲IP
+
+        :return: 机甲IP
+        """
+        assert not self._closed, 'connection is already closed'
+        return self._ip
+
     def do(self, *args) -> str:
         """
         执行任意命令
+
         :param args: 命令内容，list
         :return: 命令返回
         """
@@ -604,3 +614,33 @@ class Commander:
         resp = self.do('audio', SWITCH_ON if switch else SWITCH_OFF)
         assert self._is_ok(resp), f'audio: {resp}'
         return resp
+
+
+class EP:
+    def __init__(self, ip: str = '', timeout: float = 30):
+        self._closed: bool = False
+        self._observing_push: bool = False
+        self._observing_event: bool = False
+        self._observing_stream: bool = False
+        self._observing_audio: bool = False
+
+        self.cmd = Commander(ip=ip, timeout=timeout)
+
+    def close(self):
+        self._closed = True
+        self.cmd.close()
+
+    def _assert_ready(self):
+        assert not self._closed, 'EP is already closed'
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self):
+        self.close()
+
+    def collect_push(self, switch: bool):
+        self._assert_ready()
+        
+    def update_status_by_push(self):
+        pass
