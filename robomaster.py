@@ -152,7 +152,6 @@ class Commander:
 
     def close(self):
         with self._mu:
-            self._do()
             self._conn.close()
             self._closed = True
 
@@ -172,7 +171,7 @@ class Commander:
         cmd = ' '.join(map(str, args)) + ';'
         self._conn.send(cmd.encode())
         buf = self._conn.recv(DEFAULT_BUF_SIZE)
-        return buf.decode()
+        return buf.decode().strip()  # 返回值后面有时候会多一个迷之空格
 
     def get_ip(self) -> str:
         """
@@ -641,6 +640,6 @@ class EP:
 
     def collect_push(self, switch: bool):
         self._assert_ready()
-        
+
     def update_status_by_push(self):
         pass
