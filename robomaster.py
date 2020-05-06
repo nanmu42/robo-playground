@@ -136,7 +136,7 @@ def get_broadcast_ip(timeout: float = None) -> str:
 
 
 class Commander:
-    def __init__(self, ip: str = '', timeout: float = 5):
+    def __init__(self, ip: str = '', timeout: float = 30):
         self._mu: threading.Lock = threading.Lock()
         with self._mu:
             if ip == '':
