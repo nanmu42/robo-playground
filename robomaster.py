@@ -16,10 +16,42 @@ SWITCH_ON: str = 'on'
 SWITCH_OFF: str = 'off'
 
 # mode_enum
-MODE_CHASSIS_LEAD = 'chassis_lead'
-MODE_GIMBAL_LEAD = 'gimbal_lead'
-MODE_FREE = 'free'
+MODE_CHASSIS_LEAD: str = 'chassis_lead'
+MODE_GIMBAL_LEAD: str = 'gimbal_lead'
+MODE_FREE: str = 'free'
 MODE_ENUMS = (MODE_CHASSIS_LEAD, MODE_GIMBAL_LEAD, MODE_FREE)
+
+# armor_event_attr_enum
+ARMOR_HIT: str = 'hit'
+ARMOR_ENUMS = (ARMOR_HIT,)
+
+# sound_event_attr_enum
+SOUND_APPLAUSE: str = 'applause'
+SOUND_ENUMS = (SOUND_APPLAUSE,)
+
+# led_comp_enum
+LED_ALL = 'all'
+LED_TOP_ALL = 'top_all'
+LED_TOP_RIGHT = 'top_right'
+LED_TOP_LEFT = 'top_left'
+LED_BOTTOM_ALL = 'bottom_all'
+LED_BOTTOM_FRONT = 'bottom_front'
+LED_BOTTOM_BACK = 'bottom_back'
+LED_BOTTOM_LEFT = 'bottom_left'
+LED_BOTTOM_RIGHT = 'bottom_right'
+LED_ENUMS = (LED_ALL, LED_TOP_ALL, LED_TOP_RIGHT, LED_TOP_LEFT,
+             LED_BOTTOM_ALL, LED_BOTTOM_FRONT, LED_BOTTOM_BACK,
+             LED_BOTTOM_LEFT, LED_BOTTOM_RIGHT)
+
+# led_effect_enum
+LED_EFFECT_SOLID = 'solid'
+LED_EFFECT_OFF = 'off'
+LED_EFFECT_PULSE = 'pulse'
+LED_EFFECT_BLINK = 'blink'
+LED_EFFECT_SCROLLING = 'scrolling'
+LED_EFFECT_ENUMS = (LED_EFFECT_SOLID, LED_EFFECT_OFF,
+                    LED_EFFECT_PULSE, LED_EFFECT_BLINK,
+                    LED_EFFECT_SCROLLING)
 
 
 @dataclass
@@ -458,4 +490,117 @@ class Commander:
         assert attitude, 'at least one augment should be True'
         resp = self.do('gimbal', 'push', 'attitude', SWITCH_OFF)
         assert self._is_ok(resp), f'gimbal_push_off: {resp}'
+        return resp
+
+    def armor_sensitivity(self, value: int) -> str:
+        """
+        设置装甲板打击检测灵敏度
+
+        :param value: 装甲板灵敏度，数值越大，越容易检测到打击。
+        默认灵敏度值为 5.
+        :return: ok，否则raise
+        """
+        assert 1 <= value <= 10, f'value {value} is out of range'
+        resp = self.do('armor', 'sensitivity', value)
+        assert self._is_ok(resp), f'armor_sensitivity: {resp}'
+        return resp
+
+    def get_armor_sensitivity(self) -> int:
+        """
+        获取装甲板打击检测灵敏度
+        :return: 装甲板灵敏度
+        """
+        resp = self.do('armor', 'sensitivity', '?')
+        return int(resp)
+
+    def armor_event(self, attr: str, switch: bool) -> str:
+        """
+        控制装甲板检测事件上报
+
+        :param attr: 事件属性名称，范围见 ARMOR_ENUMS
+        :param switch: 是否开启上报
+        :return: ok，否则raise
+        """
+        assert attr in ARMOR_ENUMS, f'unexpected armor event attr {attr}'
+        resp = self.do('armor', 'event', attr, SWITCH_ON if switch else SWITCH_OFF)
+        assert self._is_ok(resp), f'armor_event: {resp}'
+        return resp
+
+    def sound_event(self, attr: str, switch: bool) -> str:
+        """
+        声音识别事件上报控制
+
+        :param attr: 事件属性名称，范围见 SOUND_ENUMS
+        :param switch: 是否开启上报
+        :return: ok，否则raise
+        """
+        assert attr in SOUND_ENUMS, f'unexpected armor event attr {attr}'
+        resp = self.do('sound', 'event', attr, SWITCH_ON if switch else SWITCH_OFF)
+        assert self._is_ok(resp), f'armor_event: {resp}'
+        return resp
+
+    def led_control(self, comp: str, effect: str, r: int, g: int, b: int) -> str:
+        """
+        控制 LED 灯效。跑马灯效果仅可作用于云台两侧 LED。
+
+        :param comp: LED 编号，见 LED_ENUMS
+        :param effect: 灯效类型，见 LED_EFFECT_ENUMS
+        :param r: RGB 红色分量值
+        :param g: RGB 绿色分量值
+        :param b: RGB 蓝色分量值
+        :return: ok，否则raise
+        """
+        assert comp in LED_ENUMS, f'unknown comp {comp}'
+        assert effect in LED_EFFECT_ENUMS, f'unknown effect {effect}'
+        assert 0 <= r <= 255, f'r {r} is out of scope'
+        assert 0 <= g <= 255, f'g {g} is out of scope'
+        assert 0 <= b <= 255, f'b {b} is out of scope'
+        if effect == LED_EFFECT_SCROLLING:
+            assert comp in (LED_TOP_ALL, LED_TOP_LEFT, LED_TOP_RIGHT), 'scrolling effect works only on gimbal LEDs'
+        resp = self.do('led', 'control', 'comp', comp, 'r', r, 'g', g, 'b', b, 'effect', effect)
+        assert self._is_ok(resp), f'led_control: {resp}'
+        return resp
+
+    def ir_sensor_measure(self, switch: bool = True):
+        """
+        打开/关闭所有红外传感器开关
+
+        :param switch: 打开/关闭
+        :return: ok，否则raise
+        """
+        resp = self.do('ir_distance_sensor', 'measure', SWITCH_ON if switch else SWITCH_OFF)
+        assert self._is_ok(resp), f'ir_sensor_measure: {resp}'
+        return resp
+
+    def get_ir_sensor_distance(self, id: int) -> int:
+        """
+        获取指定 ID 的红外深度传感器距离
+
+        :param id: 红外传感器的 ID
+        :return: 指定 ID 的红外传感器测得的距离值，单位 mm
+        """
+        assert 1 <= id <= 4, f'invalid IR sensor id {id}'
+        resp = self.do('ir_distance_sensor', 'distance', id)
+        return int(resp)
+
+    def stream(self, switch: bool) -> str:
+        """
+        视频流开关控制
+
+        :param switch: 打开/关闭
+        :return: ok，否则raise
+        """
+        resp = self.do('stream', SWITCH_ON if switch else SWITCH_OFF)
+        assert self._is_ok(resp), f'stream: {resp}'
+        return resp
+
+    def audio(self, switch: bool) -> str:
+        """
+        音频流开关控制
+
+        :param switch: 打开/关闭
+        :return: ok，否则raise
+        """
+        resp = self.do('audio', SWITCH_ON if switch else SWITCH_OFF)
+        assert self._is_ok(resp), f'audio: {resp}'
         return resp

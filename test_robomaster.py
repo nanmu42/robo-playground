@@ -219,3 +219,81 @@ class TestCommander(TestCase):
 
     def test_gimbal_push_off_raise(self):
         self.assertRaises(AssertionError, self.commander.chassis_push_off, False)
+
+    def test_armor_sensitivity(self):
+        with patch('robomaster.Commander._do', return_value='ok') as m:
+            self.assertEqual('ok', self.commander.armor_sensitivity(8))
+            m.assert_called_with('armor', 'sensitivity', 8)
+
+    def test_armor_sensitivity_raise(self):
+        self.assertRaises(AssertionError, self.commander.armor_sensitivity, 0)
+        self.assertRaises(AssertionError, self.commander.armor_sensitivity, 11)
+
+    def test_get_armor_sensitivity(self):
+        with patch('robomaster.Commander._do', return_value='7') as m:
+            self.assertEqual(7, self.commander.get_armor_sensitivity())
+            m.assert_called_with('armor', 'sensitivity', '?')
+
+    def test_armor_event(self):
+        with patch('robomaster.Commander._do', return_value='ok') as m:
+            self.assertEqual('ok', self.commander.armor_event(robomaster.ARMOR_HIT, True))
+            m.assert_called_with('armor', 'event', robomaster.ARMOR_HIT, 'on')
+            self.assertEqual('ok', self.commander.armor_event(robomaster.ARMOR_HIT, False))
+            m.assert_called_with('armor', 'event', robomaster.ARMOR_HIT, 'off')
+
+    def test_armor_event_raise(self):
+        self.assertRaises(AssertionError, self.commander.armor_event, 'whatever', True)
+        self.assertRaises(AssertionError, self.commander.armor_event, 'whatever', False)
+
+    def test_sound_event(self):
+        with patch('robomaster.Commander._do', return_value='ok') as m:
+            self.assertEqual('ok', self.commander.sound_event(robomaster.SOUND_APPLAUSE, True))
+            m.assert_called_with('sound', 'event', robomaster.SOUND_APPLAUSE, 'on')
+            self.assertEqual('ok', self.commander.sound_event(robomaster.SOUND_APPLAUSE, False))
+            m.assert_called_with('sound', 'event', robomaster.SOUND_APPLAUSE, 'off')
+
+    def test_sound_event_raise(self):
+        self.assertRaises(AssertionError, self.commander.sound_event, 'whatever', True)
+        self.assertRaises(AssertionError, self.commander.sound_event, 'whatever', False)
+
+    def test_led_control(self):
+        with patch('robomaster.Commander._do', return_value='ok') as m:
+            self.assertEqual('ok', self.commander.led_control(robomaster.LED_TOP_ALL, robomaster.LED_EFFECT_SCROLLING, 255, 128, 64))
+            m.assert_called_with('led', 'control', 'comp', robomaster.LED_TOP_ALL, 'r', 255, 'g', 128, 'b', 64, 'effect', robomaster.LED_EFFECT_SCROLLING)
+
+    def test_led_raise(self):
+        self.assertRaises(AssertionError, self.commander.led_control, 'whatever', robomaster.LED_EFFECT_SCROLLING, 255, 128, 64)
+        self.assertRaises(AssertionError, self.commander.led_control, robomaster.LED_ALL, 'whatever', 255, 128, 64)
+        self.assertRaises(AssertionError, self.commander.led_control, robomaster.LED_TOP_ALL, robomaster.LED_EFFECT_SCROLLING, 256, 128, 64)
+        self.assertRaises(AssertionError, self.commander.led_control, robomaster.LED_TOP_ALL, robomaster.LED_EFFECT_SCROLLING, 255, 256, 64)
+        self.assertRaises(AssertionError, self.commander.led_control, robomaster.LED_TOP_ALL, robomaster.LED_EFFECT_SCROLLING, 255, 255, 256)
+
+    def test_ir_sensor_measure(self):
+        with patch('robomaster.Commander._do', return_value='ok') as m:
+            self.assertEqual('ok', self.commander.ir_sensor_measure(True))
+            m.assert_called_with('ir_distance_sensor', 'measure', 'on')
+            self.assertEqual('ok', self.commander.ir_sensor_measure(False))
+            m.assert_called_with('ir_distance_sensor', 'measure', 'off')
+
+    def test_get_ir_sensor_distance(self):
+        with patch('robomaster.Commander._do', return_value='4600') as m:
+            self.assertEqual(4600, self.commander.get_ir_sensor_distance(4))
+            m.assert_called_with('ir_distance_sensor', 'distance', 4)
+
+    def test_get_ir_sensor_distance_raise(self):
+        self.assertRaises(AssertionError, self.commander.get_ir_sensor_distance, 0)
+        self.assertRaises(AssertionError, self.commander.get_ir_sensor_distance, 5)
+
+    def test_stream(self):
+        with patch('robomaster.Commander._do', return_value='ok') as m:
+            self.assertEqual('ok', self.commander.stream(True))
+            m.assert_called_with('stream', 'on')
+            self.assertEqual('ok', self.commander.stream(False))
+            m.assert_called_with('stream', 'off')
+
+    def test_audio(self):
+        with patch('robomaster.Commander._do', return_value='ok') as m:
+            self.assertEqual('ok', self.commander.audio(True))
+            m.assert_called_with('audio', 'on')
+            self.assertEqual('ok', self.commander.audio(False))
+            m.assert_called_with('audio', 'off')
