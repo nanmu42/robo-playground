@@ -634,7 +634,7 @@ def _catch_remote_exceptions(func_to_wrap):
     return new_function
 
 
-class EP:
+class Mind:
     TERMINATION_TIMEOUT = 3
     CTX = mp.get_context('spawn')
 
