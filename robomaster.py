@@ -1,6 +1,13 @@
+import functools
+import multiprocessing as mp
+import signal
 import socket
+import sys
 import threading
+import time
+import traceback
 from dataclasses import dataclass
+from typing import List, Callable
 
 VIDEO_PORT: int = 40921
 AUDIO_PORT: int = 40922
@@ -616,22 +623,48 @@ class Commander:
         return resp
 
 
+def _catch_remote_exceptions(func_to_wrap):
+    @functools.wraps(func_to_wrap)
+    def new_function(*args, **kwargs):
+        try:
+            return func_to_wrap(*args, **kwargs)
+        except Exception:
+            raise Exception("".join(traceback.format_exception(*sys.exc_info())))
+
+    return new_function
+
+
 class EP:
+    TERMINATION_TIMEOUT = 3
+    CTX = mp.get_context('spawn')
+
     def __init__(self, ip: str = '', timeout: float = 30):
-        self._closed: bool = False
-        self._observing_push: bool = False
-        self._observing_event: bool = False
-        self._observing_stream: bool = False
-        self._observing_audio: bool = False
+        self._mu = self.CTX.Lock()
+        with self._mu:
+            self._closed: mp.Event = self.CTX.Event()
+            self._workers: List = []
+            self.cmd = Commander(ip=ip, timeout=timeout)
+            signal.signal(signal.SIGINT, self.close)
+            signal.signal(signal.SIGTERM, self.close)
 
-        self.cmd = Commander(ip=ip, timeout=timeout)
-
+    @_catch_remote_exceptions
     def close(self):
-        self._closed = True
-        self.cmd.close()
+        with self._mu:
+            if self._closed.is_set():
+                return
+            self._closed.set()
+
+            end_time = time.time() + self.TERMINATION_TIMEOUT
+            for worker in self._workers:
+                remain_time = max(0.0, end_time - time.time())
+                worker.join(remain_time)
+            for worker in self._workers:
+                if worker.is_alive():
+                    worker.terminate()
+            self.cmd.close()
 
     def _assert_ready(self):
-        assert not self._closed, 'EP is already closed'
+        assert self._closed.is_set(), 'EP is closed'
 
     def __enter__(self):
         return self
@@ -639,8 +672,17 @@ class EP:
     def __exit__(self):
         self.close()
 
-    def collect_push(self, switch: bool):
-        self._assert_ready()
-        
-    def update_status_by_push(self):
-        pass
+    def worker(self, name: str, func: Callable, *args, **kwargs):
+        wrapped_func = _catch_remote_exceptions(func)
+        process = self.CTX.Process(name=name, target=wrapped_func, args=args, kwargs=kwargs)
+        self._workers.append(process)
+
+    def run(self):
+        with self._mu:
+            self._assert_ready()
+            assert len(self._workers) > 0, 'no worker registered'
+        for worker in self._workers:
+            worker.start()
+        for worker in self._workers:
+            worker.join()
+            worker.close()
