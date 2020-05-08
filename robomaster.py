@@ -672,11 +672,28 @@ class Mind:
         self.close()
 
     def worker(self, name: str, func: Callable, *args, **kwargs):
+        """
+        Register worker to process sensor data fetching, calculation,
+        inference,controlling, communication and more.
+        All workers run in their own operating system process.
+
+        :param name: name for the worker
+        :param func: worker's work
+        :param args: args to func
+        :param kwargs: kwargs to func
+        """
         wrapped_func = _catch_remote_exceptions(func)
         process = self.CTX.Process(name=name, target=wrapped_func, args=args, kwargs=kwargs)
         self._workers.append(process)
 
     def run(self):
+        """
+        Start workers and block the main process until
+        all workers terminate.
+
+        Mind tries to shutdown itself gracefully when receiving
+        SIGTERM or SIGINT.
+        """
         with self._mu:
             self._assert_ready()
             assert len(self._workers) > 0, 'no worker registered'
