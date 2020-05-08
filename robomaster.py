@@ -7,7 +7,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import List, Callable
+from typing import List, Callable, Tuple, Dict
 
 VIDEO_PORT: int = 40921
 AUDIO_PORT: int = 40922
@@ -127,14 +127,14 @@ def get_broadcast_ip(timeout: float = None) -> str:
     """
     BROADCAST_INITIAL: str = 'robot ip '
 
-    ip_listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    ip_listener.bind(('', IP_PORT))
-    ip_listener.settimeout(timeout)
+    conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    conn.bind(('', IP_PORT))
+    conn.settimeout(timeout)
     msg, ip, port = None, None, None
     try:
-        msg, (ip, port) = ip_listener.recvfrom(DEFAULT_BUF_SIZE)
+        msg, (ip, port) = conn.recvfrom(DEFAULT_BUF_SIZE)
     finally:
-        ip_listener.close()
+        conn.close()
     msg = msg.decode()
     assert len(msg) > len(BROADCAST_INITIAL), f'broken msg from {ip}:{port}: {msg}'
     msg = msg[len(BROADCAST_INITIAL):]
@@ -671,7 +671,7 @@ class Mind:
     def __exit__(self):
         self.close()
 
-    def worker(self, name: str, func: Callable, *args, **kwargs):
+    def worker(self, name: str, func: Callable, args: Tuple = None, kwargs: Dict = None):
         """
         Register worker to process sensor data fetching, calculation,
         inference,controlling, communication and more.
@@ -683,7 +683,7 @@ class Mind:
         :param kwargs: kwargs to func
         """
         wrapped_func = _catch_remote_exceptions(func)
-        process = self.CTX.Process(name=name, target=wrapped_func, args=args, kwargs=kwargs)
+        process = self.CTX.Process(name=name, target=wrapped_func, args=args, kwargs=kwargs, daemon=True)
         self._workers.append(process)
 
     def run(self):
@@ -702,3 +702,35 @@ class Mind:
         for worker in self._workers:
             worker.join()
             worker.close()
+
+
+class Collector:
+    def __init__(self, protocol: str, address: Tuple[str, int], queue: mp.Queue, processing: Callable = None, args: Tuple = None, kwargs: Dict = None):
+        self._address = address
+        self._queue = queue
+        self._processing = processing
+        self._args = args
+        self._kwargs = kwargs
+
+        if protocol == 'tcp':
+            self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        elif protocol == 'udp':
+            self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        else:
+            raise ValueError(f'unknown protocol {protocol}')
+        self._conn.bind(address)
+
+    def close(self):
+        self._conn.close()
+
+    def work(self):
+        msg = self._conn.recv()
+
+    def get_address(self) -> Tuple[str, int]:
+        return self._address
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self):
+        self.close()
