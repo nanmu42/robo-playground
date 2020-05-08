@@ -5,7 +5,7 @@ https://stackoverflow.com/questions/48353601/multiprocessing-pipe-is-even-slower
 
 import sys
 import time
-from multiprocessing import Process, Pipe, Queue
+from multiprocessing import Process, Pipe, Queue, SimpleQueue
 
 import numpy as np
 
@@ -60,6 +60,13 @@ def main_queue():
         message = recv_q.get()
 
 
+def main_simple_queue():
+    recv_q = SimpleQueue()
+    Process(target=worker_queue, args=(recv_q,)).start()
+    for num in range(NUM):
+        message = recv_q.get()
+
+
 def queue_test():
     start_time = time.time()
     main_queue()
@@ -71,11 +78,22 @@ def queue_test():
     print("Messages Per Second: " + str(msg_per_sec))
 
 
+def simple_queue_test():
+    start_time = time.time()
+    main_simple_queue()
+    end_time = time.time()
+    duration = end_time - start_time
+    msg_per_sec = NUM / duration
+    print("Simple Queue")
+    print("Duration: " + str(duration))
+    print("Messages Per Second: " + str(msg_per_sec))
+
+
 if __name__ == "__main__":
-    for i in range(2):
-        print()
-        queue_test()
-        print()
-        pipe_test_duplex()
-        print()
-        pipe_test_no_duplex()
+    queue_test()
+    print()
+    simple_queue_test()
+    print()
+    pipe_test_duplex()
+    print()
+    pipe_test_no_duplex()
