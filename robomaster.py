@@ -727,10 +727,15 @@ class Bridge:
         self._conn.close()
         self._out.close()
 
+    def _assert_ready(self):
+        assert not self._closed, 'Bridge is already closed'
+
     def _intake(self, buf_size: int):
+        self._assert_ready()
         return self._conn.recv(buf_size)
 
     def _outlet(self, payload):
+        self._assert_ready()
         try:
             self._out.put_nowait(payload)
         except queue.Full:
