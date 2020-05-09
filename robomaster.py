@@ -1,5 +1,6 @@
 import functools
 import multiprocessing as mp
+import queue
 import signal
 import socket
 import sys
@@ -7,7 +8,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import List, Callable, Tuple, Dict
+from typing import List, Callable, Tuple, Dict, Optional
 
 VIDEO_PORT: int = 40921
 AUDIO_PORT: int = 40922
@@ -704,27 +705,40 @@ class Mind:
             worker.close()
 
 
-class Collector:
-    def __init__(self, protocol: str, address: Tuple[str, int], queue: mp.Queue, processing: Callable = None, args: Tuple = None, kwargs: Dict = None):
+class Bridge:
+    def __init__(self, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float]):
+        self._closed = False
         self._address = address
-        self._queue = queue
-        self._processing = processing
-        self._args = args
-        self._kwargs = kwargs
+        self._queue = out
 
         if protocol == 'tcp':
             self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._conn.settimeout(timeout)
+            self._conn.bind(address)
         elif protocol == 'udp':
             self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._conn.settimeout(timeout)
+            self._conn.connect(self._address)
         else:
             raise ValueError(f'unknown protocol {protocol}')
-        self._conn.bind(address)
 
     def close(self):
+        self._closed = True
         self._conn.close()
+        self._queue.close()
 
-    def work(self):
-        msg = self._conn.recv()
+    def _intake(self, buf_size: int):
+        return self._conn.recv(buf_size)
+
+    def _outlet(self, payload):
+        try:
+            self._queue.put_nowait(payload)
+        except queue.Full:
+            try:
+                _ = self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            self._queue.put_nowait(payload)
 
     def get_address(self) -> Tuple[str, int]:
         return self._address
@@ -734,3 +748,12 @@ class Collector:
 
     def __exit__(self):
         self.close()
+
+
+class PushListener(Bridge):
+    def __init__(self, out: mp.Queue):
+        super().__init__(out, 'udp', ('', PUSH_PORT), None)
+
+    def work(self):
+        self._intake(DEFAULT_BUF_SIZE)
+        # TODO: 根据不同前缀解析成不同的class
