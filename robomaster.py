@@ -709,7 +709,7 @@ class Bridge:
     def __init__(self, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float]):
         self._closed = False
         self._address = address
-        self._queue = out
+        self._out = out
 
         if protocol == 'tcp':
             self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -725,20 +725,20 @@ class Bridge:
     def close(self):
         self._closed = True
         self._conn.close()
-        self._queue.close()
+        self._out.close()
 
     def _intake(self, buf_size: int):
         return self._conn.recv(buf_size)
 
     def _outlet(self, payload):
         try:
-            self._queue.put_nowait(payload)
+            self._out.put_nowait(payload)
         except queue.Full:
             try:
-                _ = self._queue.get_nowait()
+                _ = self._out.get_nowait()
             except queue.Empty:
                 pass
-            self._queue.put_nowait(payload)
+            self._out.put_nowait(payload)
 
     def get_address(self) -> Tuple[str, int]:
         return self._address
