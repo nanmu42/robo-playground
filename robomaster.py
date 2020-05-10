@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import List, Callable, Tuple, Dict, Optional
+from typing import List, Callable, Tuple, Dict, Optional, Iterator
 
 VIDEO_PORT: int = 40921
 AUDIO_PORT: int = 40922
@@ -179,7 +179,9 @@ class Commander:
         cmd = ' '.join(map(str, args)) + ';'
         self._conn.send(cmd.encode())
         buf = self._conn.recv(DEFAULT_BUF_SIZE)
-        return buf.decode().strip()  # 返回值后面有时候会多一个迷之空格
+        # 返回值后面有时候会多一个迷之空格，
+        # 为了可能的向后兼容，额外剔除终止符。
+        return buf.decode().strip(' ;')
 
     def get_ip(self) -> str:
         """
@@ -755,10 +757,39 @@ class Bridge:
         self.close()
 
 
+# examples:
+# chassis push attitude -0.894 -0.117 0.423 ; status 0 0 0 0 0 0 0 0 0 0 0 ;gimbal push attitude -0.300 -0.100 ;
+# chassis push position 0.001 0.000 ; attitude -0.892 -0.115 0.422 ; status 0 0 0 0 0 0 0 0 0 0 0 ;gimbal push attitude -0.300 -0.100 ;
+# gimbal push attitude -0.300 -0.100 ;
 class PushListener(Bridge):
+    PUSH_TYPE_CHASSIS: str = 'chassis'
+    PUSH_TYPE_GIMBAL: str = 'gimbal'
+    PUSH_TYPES: Tuple[str] = (PUSH_TYPE_CHASSIS, PUSH_TYPE_GIMBAL)
+
     def __init__(self, out: mp.Queue):
         super().__init__(out, 'udp', ('', PUSH_PORT), None)
 
+    def _parse(self, msg: str) -> List:
+        payloads: Iterator[str] = map(lambda x: x.strip(), msg.strip(' ;').split(';'))
+        current_push_type: Optional[str] = None
+        has_type_prefix: bool = False
+        parsed: List = []
+        for index, payload in enumerate(payloads):
+            words = payload.split(' ')
+            assert len(words) > 1, f'unexpected payload at index {index}, context: {msg}'
+            if words[0] in self.PUSH_TYPES:
+                current_push_type = words[0]
+                has_type_prefix = True
+            else:
+                has_type_prefix = False
+            assert current_push_type is not None, f'can not decide push type of payload at index {index}, context: {msg}'
+
+            if current_push_type == self.PUSH_TYPE_GIMBAL:
+                if has_type_prefix:
+                    assert len(words) > 3, f'invalid {self.PUSH_TYPE_GIMBAL} payload at index {index}, context: {msg}'
+
     def work(self):
-        self._intake(DEFAULT_BUF_SIZE)
-        # TODO: 根据不同前缀解析成不同的class
+        msg = self._intake(DEFAULT_BUF_SIZE).decode()
+
+# examples:
+# armor event hit 1 0 ;armor event hit 2 0 ;armor event hit 3 0 ;armor event hit 4 0 ;sound event applause 2 ;sound event applause 2 ;sound event applause 2 ;
