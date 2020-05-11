@@ -18,6 +18,8 @@ EVENT_PORT: int = 40925
 IP_PORT: int = 40926
 
 DEFAULT_BUF_SIZE: int = 512
+MEDIA_BUF_SIZE: int = 1500
+VIDEO_CHUNK_SIZE: int = 1460
 
 # switch_enum
 SWITCH_ON: str = 'on'
@@ -908,3 +910,23 @@ class EventListener(Bridge):
         payloads = self._parse(msg)
         for payload in payloads:
             self._outlet(payload)
+
+
+class Vision(Bridge):
+    TIMEOUT: float = 5.0
+
+    def __init__(self, out: mp.Queue, ip: str, processing: Callable):
+        super().__init__(out, 'tcp', (ip, VIDEO_PORT), self.TIMEOUT)
+        self._buf: bytes = b''
+
+    def work(self):
+        chunk = self._intake(MEDIA_BUF_SIZE)
+        if not chunk:
+            return
+
+        self._buf += chunk
+        if len(chunk) == VIDEO_CHUNK_SIZE:
+            return
+
+        # todo: parse into frame
+

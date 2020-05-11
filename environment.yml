@@ -4,11 +4,12 @@ channels:
   - defaults
 dependencies:
   - _libgcc_mutex=0.1=main
+  - av=8.0.1=py37h82f89c2_0
   - blas=1.0=openblas
   - bzip2=1.0.8=h516909a_2
-  - ca-certificates=2020.1.1=0
+  - ca-certificates=2020.4.5.1=hecc5488_0
   - cairo=1.16.0=hcf35c78_1003
-  - certifi=2020.4.5.1=py37_0
+  - certifi=2020.4.5.1=py37hc8dfbb8_0
   - click=7.1.1=py_0
   - dbus=1.13.6=he372182_0
   - expat=2.2.9=he1b5a44_2
@@ -58,10 +59,13 @@ dependencies:
   - nss=3.47=he751ad9_0
   - numpy=1.18.1=py37h94c655d_0
   - numpy-base=1.18.1=py37h2f8d375_1
+  - olefile=0.46=py_0
+  - openblas=0.3.7=he1df0ab_6
   - opencv=4.2.0=py37_6
   - openh264=1.8.0=hdbcaa40_1000
-  - openssl=1.1.1g=h7b6447c_0
+  - openssl=1.1.1g=h516909a_0
   - pcre=8.44=he1b5a44_0
+  - pillow=7.1.2=py37hb39fc2d_0
   - pip=20.0.2=py37_1
   - pixman=0.38.0=h516909a_1003
   - pthread-stubs=0.4=h14c3975_1001
