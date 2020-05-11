@@ -302,6 +302,7 @@ class TestCommander(TestCase):
 class TestPushListener(TestCase):
     def test__parse(self):
         with patch('robomaster.PushListener.__init__', return_value=None):
+            # noinspection PyArgumentList
             listener = robomaster.PushListener()
             ans = listener._parse('chassis push attitude -0.894 -0.117 0.423 ; status 0 1 0 0 0 0 0 0 0 0 0 ;gimbal push attitude -0.300 -0.100 ;chassis push position 0.001 0.000 ; attitude -0.892 -0.115 0.422 ;')
             self.assertEqual([
@@ -314,6 +315,31 @@ class TestPushListener(TestCase):
 
             ans = listener._parse('gimbal push attitude -0.300 -0.100 ;')
             self.assertEqual([robomaster.GimbalAttitude(pitch=-0.3, yaw=-0.1)], ans)
+
+            self.assertRaises(AssertionError, listener._parse, '')
+            self.assertRaises(AssertionError, listener._parse, 'whatever')
+
+
+class TestEventListener(TestCase):
+    def test__parse(self):
+        with patch('robomaster.EventListener.__init__', return_value=None):
+            # noinspection PyArgumentList
+            listener = robomaster.EventListener()
+            ans = listener._parse('armor event hit 1 0 ;armor event hit 2 1 ;armor event hit 3 0 ;armor event hit 4 0 ;sound event applause 2 ;sound event applause 3 ;sound event applause 2 ;')
+            self.assertEqual([
+                robomaster.ArmorHitEvent(index=1, type=0),
+                robomaster.ArmorHitEvent(index=2, type=1),
+                robomaster.ArmorHitEvent(index=3, type=0),
+                robomaster.ArmorHitEvent(index=4, type=0),
+                robomaster.SoundApplauseEvent(count=2),
+                robomaster.SoundApplauseEvent(count=3),
+                robomaster.SoundApplauseEvent(count=2),
+            ], ans)
+
+            ans = listener._parse('sound event applause 2 ;')
+            self.assertEqual([
+                robomaster.SoundApplauseEvent(count=2),
+            ], ans)
 
             self.assertRaises(AssertionError, listener._parse, '')
             self.assertRaises(AssertionError, listener._parse, 'whatever')

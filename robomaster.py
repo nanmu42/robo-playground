@@ -119,6 +119,17 @@ class GimbalAttitude:
     yaw: float
 
 
+@dataclass
+class ArmorHitEvent:
+    index: int
+    type: int
+
+
+@dataclass
+class SoundApplauseEvent:
+    count: int
+
+
 def get_broadcast_ip(timeout: float = None) -> str:
     """
     接收广播以获取机甲IP
@@ -785,7 +796,7 @@ class PushListener(Bridge):
             elif current_push_type == self.PUSH_TYPE_GIMBAL:
                 parsed.append(self._parse_gimbal_push(words, has_type_prefix))
             else:
-                raise ValueError(f'unknown push type {current_push_type}at index {index}, context: {msg}')
+                raise ValueError(f'unknown push type {current_push_type} at index {index}, context: {msg}')
         return parsed
 
     @staticmethod
@@ -830,5 +841,70 @@ class PushListener(Bridge):
         for payload in payloads:
             self._outlet(payload)
 
-# examples:
-# armor event hit 1 0 ;armor event hit 2 0 ;armor event hit 3 0 ;armor event hit 4 0 ;sound event applause 2 ;sound event applause 2 ;sound event applause 2 ;
+
+class EventListener(Bridge):
+    EVENT_TYPE_ARMOR: str = 'armor'
+    EVENT_TYPE_SOUND: str = 'sound'
+    EVENT_TYPES: Tuple[str] = (EVENT_TYPE_ARMOR, EVENT_TYPE_SOUND)
+
+    def __init__(self, out: mp.Queue, ip: str):
+        super().__init__(out, 'tcp', (ip, EVENT_PORT), None)
+
+    def _parse(self, msg: str) -> List:
+        payloads: Iterator[str] = map(lambda x: x.strip(), msg.strip(' ;').split(';'))
+        current_event_type: Optional[str] = None
+        has_type_prefix: bool = False
+        parsed: List = []
+        for index, payload in enumerate(payloads):
+            words = payload.split(' ')
+            assert len(words) > 1, f'unexpected payload at index {index}, context: {msg}'
+            if words[0] in self.EVENT_TYPES:
+                current_event_type = words[0]
+                has_type_prefix = True
+            else:
+                has_type_prefix = False
+            assert current_event_type is not None, f'can not decide event type of payload at index {index}, context: {msg}'
+
+            if current_event_type == self.EVENT_TYPE_ARMOR:
+                parsed.append(self._parse_armor_event(words, has_type_prefix))
+            elif current_event_type == self.EVENT_TYPE_SOUND:
+                parsed.append(self._parse_sound_event(words, has_type_prefix))
+            else:
+                raise ValueError(f'unknown event type {current_event_type} at index {index}, context: {msg}')
+        return parsed
+
+    @staticmethod
+    def _parse_armor_event(words: List[str], has_type_prefix: bool):
+        subtype: str = ''
+        if has_type_prefix:
+            assert len(words) > 3, f'invalid armor event payload, words: {words}'
+            subtype = words[2]
+        else:
+            assert len(words) > 1, f'invalid armor event payload, words: {words}'
+            subtype = words[0]
+
+        if subtype == ARMOR_HIT:
+            return ArmorHitEvent(int(words[-2]), int(words[-1]))
+        else:
+            raise ValueError(f'unknown armor event subtype {subtype}, context: {words}')
+
+    @staticmethod
+    def _parse_sound_event(words: List[str], has_type_prefix: bool):
+        subtype: str = ''
+        if has_type_prefix:
+            assert len(words) > 3, f'invalid sound event payload, words: {words}'
+            subtype = words[2]
+        else:
+            assert len(words) > 1, f'invalid sound event payload, words: {words}'
+            subtype = words[0]
+
+        if subtype == SOUND_APPLAUSE:
+            return SoundApplauseEvent(int(words[-1]))
+        else:
+            raise ValueError(f'unknown sound event subtype {subtype}, context: {words}')
+
+    def work(self):
+        msg = self._intake(DEFAULT_BUF_SIZE).decode()
+        payloads = self._parse(msg)
+        for payload in payloads:
+            self._outlet(payload)
