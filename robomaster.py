@@ -77,7 +77,7 @@ class ChassisSpeed:
 class ChassisPosition:
     x: float
     y: float
-    z: float
+    z: Optional[float]
 
 
 @dataclass
@@ -784,9 +784,49 @@ class PushListener(Bridge):
                 has_type_prefix = False
             assert current_push_type is not None, f'can not decide push type of payload at index {index}, context: {msg}'
 
-            if current_push_type == self.PUSH_TYPE_GIMBAL:
-                if has_type_prefix:
-                    assert len(words) > 3, f'invalid {self.PUSH_TYPE_GIMBAL} payload at index {index}, context: {msg}'
+            if current_push_type == self.PUSH_TYPE_CHASSIS:
+                parsed.append(self._parse_chassis_push(words, has_type_prefix))
+            elif current_push_type == self.PUSH_TYPE_GIMBAL:
+                parsed.append(self._parse_gimbal_push(words, has_type_prefix))
+            else:
+                raise ValueError(f'unknown push type {current_push_type}at index {index}, context: {msg}')
+        return parsed
+
+    @staticmethod
+    def _parse_gimbal_push(words: List[str], has_type_prefix: bool):
+        subtype: str = ''
+        if has_type_prefix:
+            assert len(words) > 3, f'invalid gimbal push payload, words: {words}'
+            subtype = words[2]
+        else:
+            assert len(words) > 1, f'invalid gimbal push payload, words: {words}'
+            subtype = words[0]
+
+        if subtype == 'attitude':
+            return GimbalAttitude(float(words[-2]), float(words[-1]))
+        else:
+            raise ValueError(f'unknown gimbal push subtype {subtype}, context: {words}')
+
+    @staticmethod
+    def _parse_chassis_push(words: List[str], has_type_prefix: bool):
+        subtype: str = ''
+        if has_type_prefix:
+            assert len(words) > 3, f'invalid chassis push payload, words: {words}'
+            subtype = words[2]
+        else:
+            assert len(words) > 1, f'invalid chassis push payload, words: {words}'
+            subtype = words[0]
+
+        if subtype == 'position':
+            return ChassisPosition(float(words[-2]), float(words[-1]), None)
+        elif subtype == 'attitude':
+            return ChassisAttitude(float(words[-3]), float(words[-2]), float(words[-1]))
+        elif subtype == 'status':
+            ans = words[-11:]
+            assert len(ans) == 11, f'invalid chassis status payload, words: {words}'
+            return ChassisStatus(*map(lambda x: bool(int(x)), ans))
+        else:
+            raise ValueError(f'unknown chassis push subtype {subtype}, context: {words}')
 
     def work(self):
         msg = self._intake(DEFAULT_BUF_SIZE).decode()
