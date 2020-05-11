@@ -297,3 +297,23 @@ class TestCommander(TestCase):
             m.assert_called_with('audio', 'on')
             self.assertEqual('ok', self.commander.audio(False))
             m.assert_called_with('audio', 'off')
+
+
+class TestPushListener(TestCase):
+    def test__parse(self):
+        with patch('robomaster.PushListener.__init__', return_value=None):
+            listener = robomaster.PushListener()
+            ans = listener._parse('chassis push attitude -0.894 -0.117 0.423 ; status 0 1 0 0 0 0 0 0 0 0 0 ;gimbal push attitude -0.300 -0.100 ;chassis push position 0.001 0.000 ; attitude -0.892 -0.115 0.422 ;')
+            self.assertEqual([
+                robomaster.ChassisAttitude(pitch=-0.894, roll=-0.117, yaw=0.423),
+                robomaster.ChassisStatus(static=False, uphill=True, downhill=False, on_slope=False, pick_up=False, slip=False, impact_x=False, impact_y=False, impact_z=False, roll_over=False, hill_static=False),
+                robomaster.GimbalAttitude(pitch=-0.3, yaw=-0.1),
+                robomaster.ChassisPosition(x=0.001, y=0.0, z=None),
+                robomaster.ChassisAttitude(pitch=-0.892, roll=-0.115, yaw=0.422),
+            ], ans)
+
+            ans = listener._parse('gimbal push attitude -0.300 -0.100 ;')
+            self.assertEqual([robomaster.GimbalAttitude(pitch=-0.3, yaw=-0.1)], ans)
+
+            self.assertRaises(AssertionError, listener._parse, '')
+            self.assertRaises(AssertionError, listener._parse, 'whatever')

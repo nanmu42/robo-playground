@@ -757,10 +757,6 @@ class Bridge:
         self.close()
 
 
-# examples:
-# chassis push attitude -0.894 -0.117 0.423 ; status 0 0 0 0 0 0 0 0 0 0 0 ;gimbal push attitude -0.300 -0.100 ;
-# chassis push position 0.001 0.000 ; attitude -0.892 -0.115 0.422 ; status 0 0 0 0 0 0 0 0 0 0 0 ;gimbal push attitude -0.300 -0.100 ;
-# gimbal push attitude -0.300 -0.100 ;
 class PushListener(Bridge):
     PUSH_TYPE_CHASSIS: str = 'chassis'
     PUSH_TYPE_GIMBAL: str = 'gimbal'
@@ -830,6 +826,9 @@ class PushListener(Bridge):
 
     def work(self):
         msg = self._intake(DEFAULT_BUF_SIZE).decode()
+        payloads = self._parse(msg)
+        for payload in payloads:
+            self._outlet(payload)
 
 # examples:
 # armor event hit 1 0 ;armor event hit 2 0 ;armor event hit 3 0 ;armor event hit 4 0 ;sound event applause 2 ;sound event applause 2 ;sound event applause 2 ;
