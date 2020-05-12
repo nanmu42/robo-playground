@@ -10,10 +10,12 @@ import time
 import traceback
 from dataclasses import dataclass
 from typing import List, Callable, Tuple, Dict, Optional, Iterator
+import cv2 as cv
 
 import av
+from decorator import decorator
 
-CTX = mp.get_context('spawn')
+CTX = mp.get_context('fork')
 LOG_LEVEL = logging.DEBUG
 
 VIDEO_PORT: int = 40921
@@ -644,19 +646,30 @@ class Commander:
         return resp
 
 
-def _catch_remote_exceptions(func_to_wrap):
-    @functools.wraps(func_to_wrap)
-    def new_function(*args, **kwargs):
+@decorator
+def _catch_remote_exceptions(func_to_wrap, *args, **kwargs):
+    try:
+        return func_to_wrap(*args, **kwargs)
+    except Exception:
+        raise Exception("".join(traceback.format_exception(*sys.exc_info())))
+
+
+def loop_until_close(close_func: Callable[[], None] = None, close_event: mp.Event = None):
+    def looped_function(call_to_wrap: Callable[..., None]):
         try:
-            return func_to_wrap(*args, **kwargs)
+            while not close_event.is_set():
+                call_to_wrap()
         except Exception:
             raise Exception("".join(traceback.format_exception(*sys.exc_info())))
+        finally:
+            close_func()
 
-    return new_function
+    return looped_function
 
 
 class Bridge:
     def __init__(self, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float], process_name: str = 'unnamed_process'):
+        self.__name__ = 'bridge'
         self._closed = False
         self._address = address
         self._out = out
@@ -670,11 +683,11 @@ class Bridge:
         if protocol == 'tcp':
             self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._conn.settimeout(timeout)
-            self._conn.bind(address)
+            self._conn.connect(self._address)
         elif protocol == 'udp':
             self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._conn.settimeout(timeout)
-            self._conn.connect(self._address)
+            self._conn.bind(self._address)
         else:
             raise ValueError(f'unknown protocol {protocol}')
 
@@ -684,14 +697,15 @@ class Bridge:
         self._conn.close()
         self._out.close()
 
-    def work(self):
+    def __call__(self, *args, **kwargs):
         raise SyntaxError('implement me')
 
     def get_logger(self):
         return self._logger
 
     def _assert_ready(self):
-        assert not self._closed, 'Bridge is already closed'
+        # assert not self._closed, 'Bridge is already closed'
+        pass
 
     def _intake(self, buf_size: int):
         self._assert_ready()
@@ -747,7 +761,7 @@ class Mind:
             self.cmd.close()
 
     def _assert_ready(self):
-        assert self._closed.is_set(), 'EP is closed'
+        assert not self._closed.is_set(), 'EP is closed'
 
     def __enter__(self):
         return self
@@ -755,28 +769,23 @@ class Mind:
     def __exit__(self):
         self.close()
 
-    def _loop_until_close(self, func_to_wrap: Callable, close_func: Callable):
-        @functools.wraps(func_to_wrap)
-        def looped_function(*args, **kwargs):
-            while not self._closed.is_set():
-                func_to_wrap(*args, **kwargs)
-            close_func()
+    def get_closed_event(self) -> mp.Event:
+        return self._closed
 
-        return looped_function
-
-    def worker(self, name: str, bridge: Bridge, args: Tuple = None, kwargs: Dict = None):
+    def worker(self, name: str, bridge: Bridge, args: Tuple = (), kwargs=None):
         """
         Register worker to process sensor data fetching, calculation,
         inference,controlling, communication and more.
         All workers run in their own operating system process.
 
         :param name: name for the worker
-        :param bridge: worker's definition
+        :param bridge: a callable Bridge
         :param args: args to func
         :param kwargs: kwargs to func
         """
-        wrapped_func = _catch_remote_exceptions(self._loop_until_close(bridge.work, bridge.close))
-        process = CTX.Process(name=name, target=wrapped_func, args=args, kwargs=kwargs, daemon=True)
+        if kwargs is None:
+            kwargs = {}
+        process = CTX.Process(name=name, target=bridge, args=args, kwargs=kwargs)
         self._workers.append(process)
 
     def run(self):
@@ -864,7 +873,7 @@ class PushListener(Bridge):
         else:
             raise ValueError(f'unknown chassis push subtype {subtype}, context: {words}')
 
-    def work(self):
+    def __call__(self, *args, **kwargs):
         msg = self._intake(DEFAULT_BUF_SIZE).decode()
         payloads = self._parse(msg)
         for payload in payloads:
@@ -932,7 +941,7 @@ class EventListener(Bridge):
         else:
             raise ValueError(f'unknown sound event subtype {subtype}, context: {words}')
 
-    def work(self):
+    def __call__(self, *args, **kwargs):
         msg = self._intake(DEFAULT_BUF_SIZE).decode()
         payloads = self._parse(msg)
         for payload in payloads:
@@ -942,19 +951,24 @@ class EventListener(Bridge):
 class Vision(Bridge):
     TIMEOUT: float = 5.0
 
-    def __init__(self, out: mp.Queue, ip: str, processing: Callable):
+    def __init__(self, out: mp.Queue, close_event: mp.Event,ip: str, processing: Callable[..., None]):
         super().__init__(out, 'tcp', (ip, VIDEO_PORT), self.TIMEOUT)
+        self._closed = close_event
         self._processing = processing
         self._buf: bytes = b''
         # noinspection PyUnresolvedReferences
-        self._codec = av.video.CodecContext.create('h264', 'r')
+        self._codec = av.CodecContext.create('h264', 'r')
 
     def close(self):
         try:
             self._codec.close()
         except ValueError:
             pass
+        cv.destroyAllWindows()
         super().close()
+
+    def _get_closed(self):
+        return self._closed
 
     def work(self):
         chunk = self._intake(MEDIA_BUF_SIZE)
@@ -978,3 +992,12 @@ class Vision(Bridge):
             processed = self._processing(frame)
             if processed is not None:
                 self._outlet(processed)
+
+    def __call__(self, *args, **kwargs):
+        try:
+            while not self._closed.is_set():
+                self.work()
+        except Exception:
+            raise Exception("".join(traceback.format_exception(*sys.exc_info())))
+        finally:
+            self.close()
