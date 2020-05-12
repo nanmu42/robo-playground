@@ -1,4 +1,5 @@
 import functools
+import logging
 import multiprocessing as mp
 import queue
 import signal
@@ -9,6 +10,11 @@ import time
 import traceback
 from dataclasses import dataclass
 from typing import List, Callable, Tuple, Dict, Optional, Iterator
+
+import av
+
+CTX = mp.get_context('spawn')
+LOG_LEVEL = logging.DEBUG
 
 VIDEO_PORT: int = 40921
 AUDIO_PORT: int = 40922
@@ -649,14 +655,76 @@ def _catch_remote_exceptions(func_to_wrap):
     return new_function
 
 
+class Bridge:
+    def __init__(self, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float], process_name: str = 'unnamed_process'):
+        self._closed = False
+        self._address = address
+        self._out = out
+        self._logger: logging.Logger = logging.getLogger(process_name)
+        ch = logging.StreamHandler()
+        ch.setLevel(LOG_LEVEL)
+        formatter = logging.Formatter('%(asctime)s %(name)-12s : %(levelname)-8s %(message)s')
+        ch.setFormatter(formatter)
+        self._logger.addHandler(ch)
+
+        if protocol == 'tcp':
+            self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._conn.settimeout(timeout)
+            self._conn.bind(address)
+        elif protocol == 'udp':
+            self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._conn.settimeout(timeout)
+            self._conn.connect(self._address)
+        else:
+            raise ValueError(f'unknown protocol {protocol}')
+
+    def close(self):
+        self.get_logger().info('closing...')
+        self._closed = True
+        self._conn.close()
+        self._out.close()
+
+    def work(self):
+        raise SyntaxError('implement me')
+
+    def get_logger(self):
+        return self._logger
+
+    def _assert_ready(self):
+        assert not self._closed, 'Bridge is already closed'
+
+    def _intake(self, buf_size: int):
+        self._assert_ready()
+        return self._conn.recv(buf_size)
+
+    def _outlet(self, payload):
+        self._assert_ready()
+        try:
+            self._out.put_nowait(payload)
+        except queue.Full:
+            try:
+                _ = self._out.get_nowait()
+            except queue.Empty:
+                pass
+            self._out.put_nowait(payload)
+
+    def get_address(self) -> Tuple[str, int]:
+        return self._address
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self):
+        self.close()
+
+
 class Mind:
     TERMINATION_TIMEOUT = 3
-    CTX = mp.get_context('spawn')
 
     def __init__(self, ip: str = '', timeout: float = 30):
-        self._mu = self.CTX.Lock()
+        self._mu = CTX.Lock()
         with self._mu:
-            self._closed: mp.Event = self.CTX.Event()
+            self._closed: mp.Event = CTX.Event()
             self._workers: List = []
             self.cmd = Commander(ip=ip, timeout=timeout)
             signal.signal(signal.SIGINT, self.close)
@@ -687,19 +755,28 @@ class Mind:
     def __exit__(self):
         self.close()
 
-    def worker(self, name: str, func: Callable, args: Tuple = None, kwargs: Dict = None):
+    def _loop_until_close(self, func_to_wrap: Callable, close_func: Callable):
+        @functools.wraps(func_to_wrap)
+        def looped_function(*args, **kwargs):
+            while not self._closed.is_set():
+                func_to_wrap(*args, **kwargs)
+            close_func()
+
+        return looped_function
+
+    def worker(self, name: str, bridge: Bridge, args: Tuple = None, kwargs: Dict = None):
         """
         Register worker to process sensor data fetching, calculation,
         inference,controlling, communication and more.
         All workers run in their own operating system process.
 
         :param name: name for the worker
-        :param func: worker's work
+        :param bridge: worker's definition
         :param args: args to func
         :param kwargs: kwargs to func
         """
-        wrapped_func = _catch_remote_exceptions(func)
-        process = self.CTX.Process(name=name, target=wrapped_func, args=args, kwargs=kwargs, daemon=True)
+        wrapped_func = _catch_remote_exceptions(self._loop_until_close(bridge.work, bridge.close))
+        process = CTX.Process(name=name, target=wrapped_func, args=args, kwargs=kwargs, daemon=True)
         self._workers.append(process)
 
     def run(self):
@@ -718,56 +795,6 @@ class Mind:
         for worker in self._workers:
             worker.join()
             worker.close()
-
-
-class Bridge:
-    def __init__(self, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float]):
-        self._closed = False
-        self._address = address
-        self._out = out
-
-        if protocol == 'tcp':
-            self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._conn.settimeout(timeout)
-            self._conn.bind(address)
-        elif protocol == 'udp':
-            self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self._conn.settimeout(timeout)
-            self._conn.connect(self._address)
-        else:
-            raise ValueError(f'unknown protocol {protocol}')
-
-    def close(self):
-        self._closed = True
-        self._conn.close()
-        self._out.close()
-
-    def _assert_ready(self):
-        assert not self._closed, 'Bridge is already closed'
-
-    def _intake(self, buf_size: int):
-        self._assert_ready()
-        return self._conn.recv(buf_size)
-
-    def _outlet(self, payload):
-        self._assert_ready()
-        try:
-            self._out.put_nowait(payload)
-        except queue.Full:
-            try:
-                _ = self._out.get_nowait()
-            except queue.Empty:
-                pass
-            self._out.put_nowait(payload)
-
-    def get_address(self) -> Tuple[str, int]:
-        return self._address
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self):
-        self.close()
 
 
 class PushListener(Bridge):
@@ -917,7 +944,17 @@ class Vision(Bridge):
 
     def __init__(self, out: mp.Queue, ip: str, processing: Callable):
         super().__init__(out, 'tcp', (ip, VIDEO_PORT), self.TIMEOUT)
+        self._processing = processing
         self._buf: bytes = b''
+        # noinspection PyUnresolvedReferences
+        self._codec = av.video.CodecContext.create('h264', 'r')
+
+    def close(self):
+        try:
+            self._codec.close()
+        except ValueError:
+            pass
+        super().close()
 
     def work(self):
         chunk = self._intake(MEDIA_BUF_SIZE)
@@ -928,5 +965,16 @@ class Vision(Bridge):
         if len(chunk) == VIDEO_CHUNK_SIZE:
             return
 
-        # todo: parse into frame
+        frames: List = []
+        try:
+            packet = av.packet.Packet(self._buf)
+            frames = self._codec.decode(packet)
+        except av.AVError as e:
+            self.get_logger().debug('video decoding error: %s', e)
+        finally:
+            self._buf = b''
 
+        for frame in frames:
+            processed = self._processing(frame)
+            if processed is not None:
+                self._outlet(processed)
