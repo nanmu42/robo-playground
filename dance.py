@@ -7,6 +7,7 @@ import robomaster as rm
 
 def display(frame):
     cv.imshow("frame", frame)
+    cv.waitKey(1)
 
 
 def main():
@@ -17,7 +18,7 @@ def main():
 
     r.stream(True)
     vision_queue = rm.CTX.Queue(3)
-    m.worker(rm.Vision, 'vision', (vision_queue, m.get_closed_event(), r.get_ip(), display))
+    m.worker(rm.Vision, 'vision', (vision_queue, r.get_ip(), display))
 
     m.run()
 

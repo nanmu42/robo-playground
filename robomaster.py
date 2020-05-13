@@ -643,13 +643,13 @@ class Commander:
 
 
 class Bridge:
-    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue, protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
+    def __init__(self, name: str, out: mp.Queue, protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
         assert name is not None and name != '', 'choose a good process_name to make life easier'
 
-        signal.signal(signal.SIGINT, self._relax)
-        signal.signal(signal.SIGTERM, self._relax)
+        signal.signal(signal.SIGINT, self._handle_close_signal)
+        signal.signal(signal.SIGTERM, self._handle_close_signal)
         self._name: str = name
-        self._closed: mp.Event = close_event
+        self._closed: bool = False
         self._address: Tuple[str, int] = address
         self._out: mp.Queue = out
         self._logger: logging.Logger = logging.getLogger(name)
@@ -673,14 +673,14 @@ class Bridge:
         else:
             raise ValueError(f'unknown protocol {protocol}')
 
+    def _handle_close_signal(self, sig, stacks):
+        self.close()
+
     def close(self):
         self.get_logger().info('closing...')
         if self._conn is not None:
             self._conn.close()
         self._out.close()
-
-    def _relax(self, *args):
-        pass
 
     def get_name(self) -> str:
         return self._name
@@ -690,7 +690,7 @@ class Bridge:
 
     def __call__(self) -> None:
         try:
-            while not self._closed.is_set():
+            while True:
                 self.work()
         finally:
             self.close()
@@ -699,7 +699,7 @@ class Bridge:
         return self._logger
 
     def _assert_ready(self):
-        assert not self._closed.is_set(), 'Bridge is already closed'
+        assert not self._closed, 'Bridge is already closed'
 
     def _intake(self, buf_size: int):
         self._assert_ready()
@@ -732,14 +732,14 @@ class Mind:
     def __init__(self):
         self._mu = CTX.Lock()
         with self._mu:
-            self._closed: mp.Event = CTX.Event()
+            self._closed: bool = False
             self._workers: List = []
 
     def close(self):
         with self._mu:
-            if self._closed.is_set():
+            if self._closed:
                 return
-            self._closed.set()
+            self._closed = True
 
             end_time = time.time() + self.TERMINATION_TIMEOUT
             for worker in self._workers:
@@ -750,7 +750,7 @@ class Mind:
                     worker.terminate()
 
     def _assert_ready(self):
-        assert not self._closed.is_set(), 'EP is closed'
+        assert not self._closed, 'EP is closed'
 
     def __enter__(self):
         return self
@@ -758,16 +758,14 @@ class Mind:
     def __exit__(self):
         self.close()
 
-    def get_closed_event(self) -> mp.Event:
-        return self._closed
-
     def worker(self, bridge_class, name: str, args: Tuple = (), kwargs=None):
         """
         Register worker to process sensor data fetching, calculation,
         inference,controlling, communication and more.
         All workers run in their own operating system process.
 
-        :param bridge: a callable Bridge
+        :param bridge_class:
+        :param name:
         :param args: args to func
         :param kwargs: kwargs to func
         """
@@ -807,8 +805,8 @@ class PushListener(Bridge):
     PUSH_TYPE_GIMBAL: str = 'gimbal'
     PUSH_TYPES: Tuple[str] = (PUSH_TYPE_CHASSIS, PUSH_TYPE_GIMBAL)
 
-    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue):
-        super().__init__(name, close_event, out, 'udp', ('', PUSH_PORT), None)
+    def __init__(self, name: str,  out: mp.Queue):
+        super().__init__(name, out, 'udp', ('', PUSH_PORT), None)
 
     def _parse(self, msg: str) -> List:
         payloads: Iterator[str] = map(lambda x: x.strip(), msg.strip(' ;').split(';'))
@@ -881,8 +879,8 @@ class EventListener(Bridge):
     EVENT_TYPE_SOUND: str = 'sound'
     EVENT_TYPES: Tuple[str] = (EVENT_TYPE_ARMOR, EVENT_TYPE_SOUND)
 
-    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue, ip: str):
-        super().__init__(name, close_event, out, 'tcp', (ip, EVENT_PORT), None)
+    def __init__(self, name: str,  out: mp.Queue, ip: str):
+        super().__init__(name, out, 'tcp', (ip, EVENT_PORT), None)
 
     def _parse(self, msg: str) -> List:
         payloads: Iterator[str] = map(lambda x: x.strip(), msg.strip(' ;').split(';'))
@@ -947,21 +945,17 @@ class EventListener(Bridge):
 class Vision(Bridge):
     TIMEOUT: float = 5.0
 
-    def __init__(self, name: str, out: mp.Queue, close_event: mp.Event, ip: str, processing: Callable[..., None]):
-        super().__init__(name, close_event, out, None, (ip, VIDEO_PORT), self.TIMEOUT)
-        self._closed = close_event
+    def __init__(self, name: str, out: mp.Queue,  ip: str, processing: Callable[..., None]):
+        super().__init__(name, out, None, (ip, VIDEO_PORT), self.TIMEOUT)
         self._processing = processing
         self._cap = cv.VideoCapture(f'tcp://{ip}:{VIDEO_PORT}')
         assert self._cap.isOpened(), 'failed to connect to video stream'
-        self._cap.set(cv.CAP_PROP_BUFFERSIZE, 3)
+        self._cap.set(cv.CAP_PROP_BUFFERSIZE, 6)
 
     def close(self):
         self._cap.release()
         cv.destroyAllWindows()
         super().close()
-
-    def _get_closed(self):
-        return self._closed
 
     def work(self) -> None:
         ok, frame = self._cap.read()
