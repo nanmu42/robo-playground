@@ -1,5 +1,6 @@
-import robomaster as rm
 import cv2 as cv
+
+import robomaster as rm
 
 
 def display(frame):
@@ -8,14 +9,15 @@ def display(frame):
 
 
 def main():
-    r = rm.Mind(ip='192.168.31.56')
+    m = rm.Mind()
+    r = rm.Commander(ip='192.168.31.56')
 
+    r.stream(True)
     vision_queue = rm.CTX.Queue(8)
-    vision = rm.Vision(vision_queue, r.get_closed_event(),r.cmd.get_ip(), display)
-    r.cmd.stream(True)
-    r.worker('video', vision)
+    vision = rm.Vision('vision', vision_queue, m.get_closed_event(), r.get_ip(), display)
+    m.worker(vision)
 
-    r.run()
+    m.run()
 
 
 if __name__ == '__main__':

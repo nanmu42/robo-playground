@@ -1,4 +1,3 @@
-import functools
 import logging
 import multiprocessing as mp
 import queue
@@ -9,13 +8,12 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import List, Callable, Tuple, Dict, Optional, Iterator
-import cv2 as cv
+from typing import List, Callable, Tuple, Optional, Iterator
 
 import av
-from decorator import decorator
+import cv2 as cv
 
-CTX = mp.get_context('fork')
+CTX = mp.get_context('spawn')
 LOG_LEVEL = logging.DEBUG
 
 VIDEO_PORT: int = 40921
@@ -646,39 +644,20 @@ class Commander:
         return resp
 
 
-@decorator
-def _catch_remote_exceptions(func_to_wrap, *args, **kwargs):
-    try:
-        return func_to_wrap(*args, **kwargs)
-    except Exception:
-        raise Exception("".join(traceback.format_exception(*sys.exc_info())))
-
-
-def loop_until_close(close_func: Callable[[], None] = None, close_event: mp.Event = None):
-    def looped_function(call_to_wrap: Callable[..., None]):
-        try:
-            while not close_event.is_set():
-                call_to_wrap()
-        except Exception:
-            raise Exception("".join(traceback.format_exception(*sys.exc_info())))
-        finally:
-            close_func()
-
-    return looped_function
-
-
 class Bridge:
-    def __init__(self, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float], process_name: str = 'unnamed_process'):
-        self.__name__ = 'bridge'
-        self._closed = False
-        self._address = address
-        self._out = out
-        self._logger: logging.Logger = logging.getLogger(process_name)
-        ch = logging.StreamHandler()
-        ch.setLevel(LOG_LEVEL)
+    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float]):
+        assert name is not None and name != '', 'choose a good process_name to make life easier'
+
+        self._name: str = name
+        self._closed: mp.Event = close_event
+        self._address: Tuple[str, int] = address
+        self._out: mp.Queue = out
+        self._logger: logging.Logger = logging.getLogger(name)
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(LOG_LEVEL)
         formatter = logging.Formatter('%(asctime)s %(name)-12s : %(levelname)-8s %(message)s')
-        ch.setFormatter(formatter)
-        self._logger.addHandler(ch)
+        handler.setFormatter(formatter)
+        self._logger.addHandler(handler)
 
         if protocol == 'tcp':
             self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -693,19 +672,29 @@ class Bridge:
 
     def close(self):
         self.get_logger().info('closing...')
-        self._closed = True
         self._conn.close()
         self._out.close()
 
-    def __call__(self, *args, **kwargs):
+    def get_name(self) -> str:
+        return self._name
+
+    def work(self) -> None:
         raise SyntaxError('implement me')
+
+    def __call__(self, *args, **kwargs):
+        try:
+            while not self._closed.is_set():
+                self.work()
+        except Exception:
+            raise Exception("".join(traceback.format_exception(*sys.exc_info())))
+        finally:
+            self.close()
 
     def get_logger(self):
         return self._logger
 
     def _assert_ready(self):
-        # assert not self._closed, 'Bridge is already closed'
-        pass
+        assert not self._closed.is_set(), 'Bridge is already closed'
 
     def _intake(self, buf_size: int):
         self._assert_ready()
@@ -735,16 +724,14 @@ class Bridge:
 class Mind:
     TERMINATION_TIMEOUT = 3
 
-    def __init__(self, ip: str = '', timeout: float = 30):
+    def __init__(self):
         self._mu = CTX.Lock()
         with self._mu:
             self._closed: mp.Event = CTX.Event()
             self._workers: List = []
-            self.cmd = Commander(ip=ip, timeout=timeout)
             signal.signal(signal.SIGINT, self.close)
             signal.signal(signal.SIGTERM, self.close)
 
-    @_catch_remote_exceptions
     def close(self):
         with self._mu:
             if self._closed.is_set():
@@ -758,7 +745,6 @@ class Mind:
             for worker in self._workers:
                 if worker.is_alive():
                     worker.terminate()
-            self.cmd.close()
 
     def _assert_ready(self):
         assert not self._closed.is_set(), 'EP is closed'
@@ -772,20 +758,19 @@ class Mind:
     def get_closed_event(self) -> mp.Event:
         return self._closed
 
-    def worker(self, name: str, bridge: Bridge, args: Tuple = (), kwargs=None):
+    def worker(self, bridge: Bridge, args: Tuple = (), kwargs=None):
         """
         Register worker to process sensor data fetching, calculation,
         inference,controlling, communication and more.
         All workers run in their own operating system process.
 
-        :param name: name for the worker
         :param bridge: a callable Bridge
         :param args: args to func
         :param kwargs: kwargs to func
         """
         if kwargs is None:
             kwargs = {}
-        process = CTX.Process(name=name, target=bridge, args=args, kwargs=kwargs)
+        process = CTX.Process(name=bridge.get_name(), target=bridge, args=args, kwargs=kwargs)
         self._workers.append(process)
 
     def run(self):
@@ -811,8 +796,8 @@ class PushListener(Bridge):
     PUSH_TYPE_GIMBAL: str = 'gimbal'
     PUSH_TYPES: Tuple[str] = (PUSH_TYPE_CHASSIS, PUSH_TYPE_GIMBAL)
 
-    def __init__(self, out: mp.Queue):
-        super().__init__(out, 'udp', ('', PUSH_PORT), None)
+    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue):
+        super().__init__(name, close_event, out, 'udp', ('', PUSH_PORT), None)
 
     def _parse(self, msg: str) -> List:
         payloads: Iterator[str] = map(lambda x: x.strip(), msg.strip(' ;').split(';'))
@@ -873,7 +858,7 @@ class PushListener(Bridge):
         else:
             raise ValueError(f'unknown chassis push subtype {subtype}, context: {words}')
 
-    def __call__(self, *args, **kwargs):
+    def work(self) -> None:
         msg = self._intake(DEFAULT_BUF_SIZE).decode()
         payloads = self._parse(msg)
         for payload in payloads:
@@ -885,8 +870,8 @@ class EventListener(Bridge):
     EVENT_TYPE_SOUND: str = 'sound'
     EVENT_TYPES: Tuple[str] = (EVENT_TYPE_ARMOR, EVENT_TYPE_SOUND)
 
-    def __init__(self, out: mp.Queue, ip: str):
-        super().__init__(out, 'tcp', (ip, EVENT_PORT), None)
+    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue, ip: str):
+        super().__init__(name, close_event, out, 'tcp', (ip, EVENT_PORT), None)
 
     def _parse(self, msg: str) -> List:
         payloads: Iterator[str] = map(lambda x: x.strip(), msg.strip(' ;').split(';'))
@@ -941,7 +926,7 @@ class EventListener(Bridge):
         else:
             raise ValueError(f'unknown sound event subtype {subtype}, context: {words}')
 
-    def __call__(self, *args, **kwargs):
+    def work(self) -> None:
         msg = self._intake(DEFAULT_BUF_SIZE).decode()
         payloads = self._parse(msg)
         for payload in payloads:
@@ -951,8 +936,8 @@ class EventListener(Bridge):
 class Vision(Bridge):
     TIMEOUT: float = 5.0
 
-    def __init__(self, out: mp.Queue, close_event: mp.Event,ip: str, processing: Callable[..., None]):
-        super().__init__(out, 'tcp', (ip, VIDEO_PORT), self.TIMEOUT)
+    def __init__(self, name: str, out: mp.Queue, close_event: mp.Event, ip: str, processing: Callable[..., None]):
+        super().__init__(name, close_event, out, 'tcp', (ip, VIDEO_PORT), self.TIMEOUT)
         self._closed = close_event
         self._processing = processing
         self._buf: bytes = b''
@@ -970,7 +955,7 @@ class Vision(Bridge):
     def _get_closed(self):
         return self._closed
 
-    def work(self):
+    def work(self) -> None:
         chunk = self._intake(MEDIA_BUF_SIZE)
         if not chunk:
             return
@@ -992,12 +977,3 @@ class Vision(Bridge):
             processed = self._processing(frame)
             if processed is not None:
                 self._outlet(processed)
-
-    def __call__(self, *args, **kwargs):
-        try:
-            while not self._closed.is_set():
-                self.work()
-        except Exception:
-            raise Exception("".join(traceback.format_exception(*sys.exc_info())))
-        finally:
-            self.close()
