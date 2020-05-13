@@ -4,7 +4,6 @@ import queue
 import signal
 import socket
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from typing import List, Callable, Tuple, Optional, Iterator
@@ -162,7 +161,7 @@ def get_broadcast_ip(timeout: float = None) -> str:
 
 class Commander:
     def __init__(self, ip: str = '', timeout: float = 30):
-        self._mu: threading.Lock = threading.Lock()
+        self._mu: mp.Lock = CTX.Lock()
         with self._mu:
             if ip == '':
                 ip = get_broadcast_ip(timeout)
@@ -646,41 +645,48 @@ class Bridge:
     def __init__(self, name: str, out: mp.Queue, protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
         assert name is not None and name != '', 'choose a good process_name to make life easier'
 
-        signal.signal(signal.SIGINT, self._handle_close_signal)
-        signal.signal(signal.SIGTERM, self._handle_close_signal)
-        self._name: str = name
-        self._closed: bool = False
-        self._address: Tuple[str, int] = address
-        self._out: mp.Queue = out
-        self._logger: logging.Logger = logging.getLogger(name)
-        self._logger.setLevel(LOG_LEVEL)
-        handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter('%(asctime)s %(name)-12s : %(levelname)-8s %(message)s')
-        handler.setFormatter(formatter)
-        self._logger.addHandler(handler)
+        self._mu = CTX.Lock()
+        with self._mu:
+            signal.signal(signal.SIGINT, self._handle_close_signal)
+            signal.signal(signal.SIGTERM, self._handle_close_signal)
+            self._name: str = name
+            self._closed: bool = False
+            self._address: Tuple[str, int] = address
+            self._out: mp.Queue = out
+            self._logger: logging.Logger = logging.getLogger(name)
+            self._logger.setLevel(LOG_LEVEL)
+            handler = logging.StreamHandler(sys.stdout)
+            formatter = logging.Formatter('%(asctime)s %(name)-12s : %(levelname)-8s %(message)s')
+            handler.setFormatter(formatter)
+            self._logger.addHandler(handler)
 
-        if protocol == 'tcp':
-            self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._conn.settimeout(timeout)
-            self._conn.connect(self._address)
-        elif protocol == 'udp':
-            self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self._conn.settimeout(timeout)
-            self._conn.bind(self._address)
-        elif protocol is None:
-            self._conn = None
-            pass
-        else:
-            raise ValueError(f'unknown protocol {protocol}')
+            if protocol == 'tcp':
+                self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._conn.settimeout(timeout)
+                self._conn.connect(self._address)
+            elif protocol == 'udp':
+                self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self._conn.settimeout(timeout)
+                self._conn.bind(self._address)
+            elif protocol is None:
+                self._conn = None
+                pass
+            else:
+                raise ValueError(f'unknown protocol {protocol}')
 
     def _handle_close_signal(self, sig, stacks):
         self.close()
 
     def close(self):
-        self.get_logger().info('closing...')
-        if self._conn is not None:
-            self._conn.close()
-        self._out.close()
+        with self._mu:
+            if self._closed:
+                return
+
+            self._closed = True
+            self.get_logger().info('signal received, closing...')
+            if self._conn is not None:
+                self._conn.close()
+            self._out.close()
 
     def get_name(self) -> str:
         return self._name
@@ -690,7 +696,7 @@ class Bridge:
 
     def __call__(self) -> None:
         try:
-            while True:
+            while not self._closed:
                 self.work()
         finally:
             self.close()
