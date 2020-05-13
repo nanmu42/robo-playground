@@ -6,11 +6,9 @@ import socket
 import sys
 import threading
 import time
-import traceback
 from dataclasses import dataclass
 from typing import List, Callable, Tuple, Optional, Iterator
 
-import av
 import cv2 as cv
 
 CTX = mp.get_context('spawn')
@@ -645,16 +643,18 @@ class Commander:
 
 
 class Bridge:
-    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue, protocol: str, address: Tuple[str, int], timeout: Optional[float]):
+    def __init__(self, name: str, close_event: mp.Event, out: mp.Queue, protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
         assert name is not None and name != '', 'choose a good process_name to make life easier'
 
+        signal.signal(signal.SIGINT, self._relax)
+        signal.signal(signal.SIGTERM, self._relax)
         self._name: str = name
         self._closed: mp.Event = close_event
         self._address: Tuple[str, int] = address
         self._out: mp.Queue = out
         self._logger: logging.Logger = logging.getLogger(name)
+        self._logger.setLevel(LOG_LEVEL)
         handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(LOG_LEVEL)
         formatter = logging.Formatter('%(asctime)s %(name)-12s : %(levelname)-8s %(message)s')
         handler.setFormatter(formatter)
         self._logger.addHandler(handler)
@@ -667,13 +667,20 @@ class Bridge:
             self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._conn.settimeout(timeout)
             self._conn.bind(self._address)
+        elif protocol is None:
+            self._conn = None
+            pass
         else:
             raise ValueError(f'unknown protocol {protocol}')
 
     def close(self):
         self.get_logger().info('closing...')
-        self._conn.close()
+        if self._conn is not None:
+            self._conn.close()
         self._out.close()
+
+    def _relax(self, *args):
+        pass
 
     def get_name(self) -> str:
         return self._name
@@ -681,12 +688,10 @@ class Bridge:
     def work(self) -> None:
         raise SyntaxError('implement me')
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self) -> None:
         try:
             while not self._closed.is_set():
                 self.work()
-        except Exception:
-            raise Exception("".join(traceback.format_exception(*sys.exc_info())))
         finally:
             self.close()
 
@@ -729,8 +734,6 @@ class Mind:
         with self._mu:
             self._closed: mp.Event = CTX.Event()
             self._workers: List = []
-            signal.signal(signal.SIGINT, self.close)
-            signal.signal(signal.SIGTERM, self.close)
 
     def close(self):
         with self._mu:
@@ -758,7 +761,7 @@ class Mind:
     def get_closed_event(self) -> mp.Event:
         return self._closed
 
-    def worker(self, bridge: Bridge, args: Tuple = (), kwargs=None):
+    def worker(self, bridge_class, name: str, args: Tuple = (), kwargs=None):
         """
         Register worker to process sensor data fetching, calculation,
         inference,controlling, communication and more.
@@ -770,8 +773,14 @@ class Mind:
         """
         if kwargs is None:
             kwargs = {}
-        process = CTX.Process(name=bridge.get_name(), target=bridge, args=args, kwargs=kwargs)
+        process = CTX.Process(name=name, target=self._build_bridge_and_run, args=(bridge_class, name, *args), kwargs=kwargs)
         self._workers.append(process)
+
+    @staticmethod
+    def _build_bridge_and_run(*args, **kwargs):
+        bridge_class = args[0]
+        bridge = bridge_class(*args[1:], **kwargs)
+        bridge()
 
     def run(self):
         """
@@ -786,8 +795,10 @@ class Mind:
             assert len(self._workers) > 0, 'no worker registered'
         for worker in self._workers:
             worker.start()
+
+        signal.sigwait((signal.SIGINT, signal.SIGTERM))
+        self.close()
         for worker in self._workers:
-            worker.join()
             worker.close()
 
 
@@ -937,18 +948,15 @@ class Vision(Bridge):
     TIMEOUT: float = 5.0
 
     def __init__(self, name: str, out: mp.Queue, close_event: mp.Event, ip: str, processing: Callable[..., None]):
-        super().__init__(name, close_event, out, 'tcp', (ip, VIDEO_PORT), self.TIMEOUT)
+        super().__init__(name, close_event, out, None, (ip, VIDEO_PORT), self.TIMEOUT)
         self._closed = close_event
         self._processing = processing
-        self._buf: bytes = b''
-        # noinspection PyUnresolvedReferences
-        self._codec = av.CodecContext.create('h264', 'r')
+        self._cap = cv.VideoCapture(f'tcp://{ip}:{VIDEO_PORT}')
+        assert self._cap.isOpened(), 'failed to connect to video stream'
+        self._cap.set(cv.CAP_PROP_BUFFERSIZE, 3)
 
     def close(self):
-        try:
-            self._codec.close()
-        except ValueError:
-            pass
+        self._cap.release()
         cv.destroyAllWindows()
         super().close()
 
@@ -956,24 +964,8 @@ class Vision(Bridge):
         return self._closed
 
     def work(self) -> None:
-        chunk = self._intake(MEDIA_BUF_SIZE)
-        if not chunk:
-            return
-
-        self._buf += chunk
-        if len(chunk) == VIDEO_CHUNK_SIZE:
-            return
-
-        frames: List = []
-        try:
-            packet = av.packet.Packet(self._buf)
-            frames = self._codec.decode(packet)
-        except av.AVError as e:
-            self.get_logger().debug('video decoding error: %s', e)
-        finally:
-            self._buf = b''
-
-        for frame in frames:
-            processed = self._processing(frame)
-            if processed is not None:
-                self._outlet(processed)
+        ok, frame = self._cap.read()
+        assert ok, 'can not receive frame (stream end?)'
+        processed = self._processing(frame)
+        if processed is not None:
+            self._outlet(processed)

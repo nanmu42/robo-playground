@@ -1,21 +1,23 @@
+import pickle
+
 import cv2 as cv
 
 import robomaster as rm
 
 
 def display(frame):
-    img = frame.to_nd_array()
-    cv.imshow("Test", img)
+    cv.imshow("frame", frame)
 
 
 def main():
+    pickle.DEFAULT_PROTOCOL = pickle.HIGHEST_PROTOCOL
+
     m = rm.Mind()
     r = rm.Commander(ip='192.168.31.56')
 
     r.stream(True)
-    vision_queue = rm.CTX.Queue(8)
-    vision = rm.Vision('vision', vision_queue, m.get_closed_event(), r.get_ip(), display)
-    m.worker(vision)
+    vision_queue = rm.CTX.Queue(3)
+    m.worker(rm.Vision, 'vision', (vision_queue, m.get_closed_event(), r.get_ip(), display))
 
     m.run()
 
