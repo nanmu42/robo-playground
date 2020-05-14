@@ -99,10 +99,8 @@ class Controller:
             self.send_command()
 
     def send_command(self):
-        if any((self.vx, self.vy, self.vz)):
-            self.cmd.chassis_speed(self.vx, self.vy, self.vz)
-        if self.v_pitch:
-            self.cmd.gimbal_speed(self.v_pitch, 0)
+        self.cmd.chassis_speed(0, 0, 0)
+        self.cmd.gimbal_speed(self.v_pitch, 0)
 
 
 def control(cmd: rm.Commander, logger: logging.Logger) -> None:
