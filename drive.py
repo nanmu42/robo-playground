@@ -1,33 +1,41 @@
 import logging
 import multiprocessing as mp
 import pickle
+import queue
 import threading
 from typing import Tuple
 
 import click
 import cv2 as cv
 from pynput import keyboard
-from pynput.keyboard import Key
+from pynput.keyboard import Key, KeyCode
 
 import robomaster as rm
 
 QUEUE_SIZE: int = 3
 
 
-def display(frame) -> None:
+def display(frame, **kwargs) -> None:
     cv.imshow("frame", frame)
     cv.waitKey(1)
 
 
 def handle_event(cmd: rm.Commander, queues: Tuple[mp.Queue, ...], logger: logging.Logger) -> None:
     push_queue, event_queue = queues
-    push = push_queue.get()
-    # safety first
-    if type(push) == rm.ArmorHitEvent:
-        cmd.chassis_wheel(0, 0, 0, 0)
+    try:
+        push = push_queue.get_nowait()
+        logger.info('push: %s', push)
+    except queue.Empty:
+        pass
 
-    logger.info('push: %s', push)
-    logger.info('event: %s', event_queue.get())
+    try:
+        event = event_queue.get()
+        # safety first
+        if type(event) == rm.ArmorHitEvent:
+            cmd.chassis_wheel(0, 0, 0, 0)
+        logger.info('event: %s', event)
+    except queue.Empty:
+        pass
 
 
 class Controller:
@@ -49,22 +57,23 @@ class Controller:
                 self.cmd.blaster_fire()
                 return
 
-            if key == 'w':
-                self.vx += self.DELTA_SPEED
-            elif key == 's':
-                self.vx -= self.DELTA_SPEED
-            elif key == 'a':
-                self.vy -= self.DELTA_SPEED
-            elif key == 'd':
-                self.vy += self.DELTA_SPEED
+            self.logger.debug('pressed: %s', key)
+            if key == KeyCode(char='w'):
+                self.vx = self.DELTA_SPEED
+            elif key == KeyCode(char='s'):
+                self.vx = -self.DELTA_SPEED
+            elif key == KeyCode(char='a'):
+                self.vy = -self.DELTA_SPEED
+            elif key == KeyCode(char='d'):
+                self.vy = self.DELTA_SPEED
             elif key == Key.up:
-                self.v_pitch += self.DELTA_DEGREE
+                self.v_pitch = self.DELTA_DEGREE
             elif key == Key.down:
-                self.v_pitch -= self.DELTA_DEGREE
+                self.v_pitch = -self.DELTA_DEGREE
             elif key == Key.left:
-                self.vz -= self.DELTA_DEGREE
+                self.vz = -self.DELTA_DEGREE
             elif key == Key.right:
-                self.vz += self.DELTA_DEGREE
+                self.vz = self.DELTA_DEGREE
 
             self.send_command()
 
@@ -79,31 +88,28 @@ class Controller:
                 self.send_command()
                 return False
 
-            if key == 'w':
-                self.vx -= self.DELTA_SPEED
-            elif key == 's':
-                self.vx += self.DELTA_SPEED
-            elif key == 'a':
-                self.vy += self.DELTA_SPEED
-            elif key == 'd':
-                self.vy -= self.DELTA_SPEED
-            elif key == Key.up:
-                self.v_pitch -= self.DELTA_DEGREE
-            elif key == Key.down:
-                self.v_pitch += self.DELTA_DEGREE
-            elif key == Key.left:
-                self.vz += self.DELTA_DEGREE
-            elif key == Key.right:
-                self.vz -= self.DELTA_DEGREE
+            self.logger.debug('released: %s', key)
+            if key in (KeyCode(char='w'), KeyCode(char='s')):
+                self.vx = 0
+            elif key in (KeyCode(char='a'), KeyCode(char='d')):
+                self.vy = 0
+            elif key in (Key.up, Key.down):
+                self.v_pitch = 0
+            elif key in (Key.left, Key.right):
+                self.vz = 0
 
             self.send_command()
 
     def send_command(self):
-        self.cmd.chassis_speed(self.vx, self.vy, self.vz)
+        self.logger.debug('x: %s, y: %s, z: %s, pitch: %s', self.vx, self.vy, self.vz, self.v_pitch)
+        if not any((self.vx, self.vy, self.vz)):
+            self.cmd.chassis_wheel(0, 0, 0, 0)
+        else:
+            self.cmd.chassis_speed(self.vx, self.vy, self.vz)
         self.cmd.gimbal_speed(self.v_pitch, 0)
 
 
-def control(cmd: rm.Commander, logger: logging.Logger) -> None:
+def control(cmd: rm.Commander, logger: logging.Logger, **kwargs) -> None:
     controller = Controller(cmd, logger)
     with keyboard.Listener(
             on_press=controller.on_press,
@@ -121,22 +127,23 @@ def cli(ip: str, timeout: float):
 
     # vision
     cmd.stream(True)
-    hub.worker(rm.Vision, 'vision', (None, cmd.get_ip(), display))
+    hub.worker(rm.Vision, 'vision', (None, ip, display))
 
     # push and event
     cmd.chassis_push_on(1, 1, 1)
     cmd.gimbal_push_on(1)
     cmd.armor_event(rm.ARMOR_HIT, True)
-    cmd.armor_event(rm.SOUND_APPLAUSE, True)
+    cmd.sound_event(rm.SOUND_APPLAUSE, True)
     push_queue = rm.CTX.Queue(QUEUE_SIZE)
     event_queue = rm.CTX.Queue(QUEUE_SIZE)
     hub.worker(rm.PushListener, 'push', (push_queue,))
-    hub.worker(rm.EventListener, 'event', (event_queue,))
+    hub.worker(rm.EventListener, 'event', (event_queue, ip))
 
     # push and event handler
     hub.worker(rm.Mind, 'event-handler', ((push_queue, event_queue), ip, handle_event))
 
     # controller
+    cmd.robot_mode(rm.MODE_CHASSIS_LEAD)
     hub.worker(rm.Mind, 'controller', ((), ip, control))
 
     hub.run()

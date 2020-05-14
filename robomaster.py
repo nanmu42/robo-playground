@@ -1,6 +1,5 @@
 import logging
 import multiprocessing as mp
-import queue
 import signal
 import socket
 import sys
@@ -724,14 +723,7 @@ class Bridge:
 
     def _outlet(self, payload):
         self._assert_ready()
-        try:
-            self._out.put_nowait(payload)
-        except queue.Full:
-            try:
-                _ = self._out.get_nowait()
-            except queue.Empty:
-                pass
-            self._out.put_nowait(payload)
+        self._out.put(payload)
 
     def get_address(self) -> Tuple[str, int]:
         return self._address
