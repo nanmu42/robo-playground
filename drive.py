@@ -99,7 +99,7 @@ class Controller:
             self.send_command()
 
     def send_command(self):
-        self.cmd.chassis_speed(0, 0, 0)
+        self.cmd.chassis_speed(self.vx, self.vy, self.vz)
         self.cmd.gimbal_speed(self.v_pitch, 0)
 
 
