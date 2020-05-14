@@ -640,10 +640,20 @@ class Commander:
         assert self._is_ok(resp), f'audio: {resp}'
         return resp
 
+    def blaster_fire(self) -> str:
+        """
+        控制水弹枪发射一次
+
+        :return: ok，否则raise
+        """
+        resp = self.do('blaster', 'fire')
+        assert self._is_ok(resp), f'blaster_fire: {resp}'
+        return resp
+
 
 class Bridge:
-    def __init__(self, name: str, out: mp.Queue, protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
-        assert name is not None and name != '', 'choose a good process_name to make life easier'
+    def __init__(self, name: str, out: Optional[mp.Queue], protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
+        assert name is not None and name != '', 'choose a good name to make life easier'
 
         self._mu = CTX.Lock()
         with self._mu:
@@ -652,7 +662,7 @@ class Bridge:
             self._name: str = name
             self._closed: bool = False
             self._address: Tuple[str, int] = address
-            self._out: mp.Queue = out
+            self._out: Optional[mp.Queue] = out
             self._logger: logging.Logger = logging.getLogger(name)
             self._logger.setLevel(LOG_LEVEL)
             handler = logging.StreamHandler(sys.stdout)
@@ -686,7 +696,8 @@ class Bridge:
             self.get_logger().info('signal received, closing...')
             if self._conn is not None:
                 self._conn.close()
-            self._out.close()
+            if self._out is not None:
+                self._out.close()
 
     def get_name(self) -> str:
         return self._name
@@ -732,7 +743,7 @@ class Bridge:
         self.close()
 
 
-class Mind:
+class Hub:
     TERMINATION_TIMEOUT = 3
 
     def __init__(self):
@@ -811,7 +822,7 @@ class PushListener(Bridge):
     PUSH_TYPE_GIMBAL: str = 'gimbal'
     PUSH_TYPES: Tuple[str] = (PUSH_TYPE_CHASSIS, PUSH_TYPE_GIMBAL)
 
-    def __init__(self, name: str,  out: mp.Queue):
+    def __init__(self, name: str, out: mp.Queue):
         super().__init__(name, out, 'udp', ('', PUSH_PORT), None)
 
     def _parse(self, msg: str) -> List:
@@ -885,7 +896,7 @@ class EventListener(Bridge):
     EVENT_TYPE_SOUND: str = 'sound'
     EVENT_TYPES: Tuple[str] = (EVENT_TYPE_ARMOR, EVENT_TYPE_SOUND)
 
-    def __init__(self, name: str,  out: mp.Queue, ip: str):
+    def __init__(self, name: str, out: mp.Queue, ip: str):
         super().__init__(name, out, 'tcp', (ip, EVENT_PORT), None)
 
     def _parse(self, msg: str) -> List:
@@ -951,7 +962,7 @@ class EventListener(Bridge):
 class Vision(Bridge):
     TIMEOUT: float = 5.0
 
-    def __init__(self, name: str, out: mp.Queue,  ip: str, processing: Callable[..., None]):
+    def __init__(self, name: str, out: Optional[mp.Queue], ip: str, processing: Callable[..., None]):
         super().__init__(name, out, None, (ip, VIDEO_PORT), self.TIMEOUT)
         self._processing = processing
         self._cap = cv.VideoCapture(f'tcp://{ip}:{VIDEO_PORT}')
@@ -960,12 +971,26 @@ class Vision(Bridge):
 
     def close(self):
         self._cap.release()
-        cv.destroyAllWindows()
         super().close()
 
     def work(self) -> None:
         ok, frame = self._cap.read()
         assert ok, 'can not receive frame (stream end?)'
-        processed = self._processing(frame)
+        processed = self._processing(frame=frame, logger=self.get_logger())
         if processed is not None:
             self._outlet(processed)
+
+
+class Mind(Bridge):
+    def __init__(self, name: str, queues: Tuple[mp.Queue, ...], ip: str, processing: Callable[..., None], timeout: float = 30):
+        super().__init__(name, None, None, (ip, VIDEO_PORT), timeout)
+        self._queues = queues
+        self._processing = processing
+        self._cmd = Commander(ip, timeout)
+
+    def close(self):
+        self._cmd.close()
+        super().close()
+
+    def work(self) -> None:
+        self._processing(cmd=self._cmd, queues=self._queues, logger=self.get_logger())
