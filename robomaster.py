@@ -10,6 +10,7 @@ from typing import List, Callable, Tuple, Optional, Iterator
 import cv2 as cv
 
 CTX = mp.get_context('spawn')
+Manager = CTX.Manager()
 LOG_LEVEL = logging.DEBUG
 
 VIDEO_PORT: int = 40921
@@ -650,7 +651,7 @@ class Commander:
         return resp
 
 
-class Bridge:
+class Worker:
     def __init__(self, name: str, out: Optional[mp.Queue], protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
         assert name is not None and name != '', 'choose a good name to make life easier'
 
@@ -715,7 +716,7 @@ class Bridge:
         return self._logger
 
     def _assert_ready(self):
-        assert not self._closed, 'Bridge is already closed'
+        assert not self._closed, 'Worker is already closed'
 
     def _intake(self, buf_size: int):
         self._assert_ready()
@@ -767,27 +768,27 @@ class Hub:
     def __exit__(self):
         self.close()
 
-    def worker(self, bridge_class, name: str, args: Tuple = (), kwargs=None):
+    def worker(self, worker_class, name: str, args: Tuple = (), kwargs=None):
         """
         Register worker to process sensor data fetching, calculation,
         inference,controlling, communication and more.
         All workers run in their own operating system process.
 
-        :param bridge_class:
+        :param worker_class:
         :param name:
         :param args: args to func
         :param kwargs: kwargs to func
         """
         if kwargs is None:
             kwargs = {}
-        process = CTX.Process(name=name, target=self._build_bridge_and_run, args=(bridge_class, name, *args), kwargs=kwargs)
+        process = CTX.Process(name=name, target=self._build_worker_and_run, args=(worker_class, name, *args), kwargs=kwargs)
         self._workers.append(process)
 
     @staticmethod
-    def _build_bridge_and_run(*args, **kwargs):
-        bridge_class = args[0]
-        bridge = bridge_class(*args[1:], **kwargs)
-        bridge()
+    def _build_worker_and_run(*args, **kwargs):
+        worker_class = args[0]
+        worker = worker_class(*args[1:], **kwargs)
+        worker()
 
     def run(self):
         """
@@ -809,7 +810,7 @@ class Hub:
             worker.close()
 
 
-class PushListener(Bridge):
+class PushListener(Worker):
     PUSH_TYPE_CHASSIS: str = 'chassis'
     PUSH_TYPE_GIMBAL: str = 'gimbal'
     PUSH_TYPES: Tuple[str] = (PUSH_TYPE_CHASSIS, PUSH_TYPE_GIMBAL)
@@ -883,7 +884,7 @@ class PushListener(Bridge):
             self._outlet(payload)
 
 
-class EventListener(Bridge):
+class EventListener(Worker):
     EVENT_TYPE_ARMOR: str = 'armor'
     EVENT_TYPE_SOUND: str = 'sound'
     EVENT_TYPES: Tuple[str] = (EVENT_TYPE_ARMOR, EVENT_TYPE_SOUND)
@@ -951,7 +952,7 @@ class EventListener(Bridge):
             self._outlet(payload)
 
 
-class Vision(Bridge):
+class Vision(Worker):
     TIMEOUT: float = 5.0
 
     def __init__(self, name: str, out: Optional[mp.Queue], ip: str, processing: Callable[..., None]):
@@ -973,7 +974,7 @@ class Vision(Bridge):
             self._outlet(processed)
 
 
-class Mind(Bridge):
+class Mind(Worker):
     def __init__(self, name: str, queues: Tuple[mp.Queue, ...], ip: str, processing: Callable[..., None], timeout: float = 30):
         super().__init__(name, None, None, (ip, VIDEO_PORT), timeout)
         self._queues = queues
