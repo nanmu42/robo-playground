@@ -53,9 +53,21 @@ class Controller:
         self.previous_v: List[float, float, float] = [0, 0, 0]
         self.v_pitch: float = 0.0
         self.previous_v_pitch: float = 0.0
+        self.ctrl_pressed: bool = False
 
     def on_press(self, key):
         with self._mu:
+            if key == Key.ctrl:
+                self.ctrl_pressed = True
+                return
+            if self.ctrl_pressed and key == KeyCode(char='c'):
+                # stop listener
+                self.v[0]: float = 0.0
+                self.v[1]: float = 0.0
+                self.v[2]: float = 0.0
+                self.v_pitch: float = 0.0
+                self.send_command()
+                return False
             if key == Key.space:
                 self.cmd.blaster_fire()
                 return
@@ -82,14 +94,9 @@ class Controller:
 
     def on_release(self, key):
         with self._mu:
-            if key == Key.esc:
-                # stop listener
-                self.v[0]: float = 0.0
-                self.v[1]: float = 0.0
-                self.v[2]: float = 0.0
-                self.v_pitch: float = 0.0
-                self.send_command()
-                return False
+            if key == Key.ctrl:
+                self.ctrl_pressed = False
+                return
 
             self.logger.debug('released: %s', key)
             if key in (KeyCode(char='w'), KeyCode(char='s')):
@@ -107,10 +114,10 @@ class Controller:
         if self.v != self.previous_v:
             self.previous_v = [*self.v]
             self.logger.debug('x: %s, y: %s, z: %s', self.v[0], self.v[1], self.v[2])
-            if not any(self.v):
-                self.cmd.chassis_wheel(0, 0, 0, 0)
-            else:
+            if any(self.v):
                 self.cmd.chassis_speed(self.v[0], self.v[1], self.v[2])
+            else:
+                self.cmd.chassis_wheel(0, 0, 0, 0)
         if self.v_pitch != self.previous_v_pitch:
             self.previous_v_pitch = self.v_pitch
             self.cmd.gimbal_speed(self.v_pitch, self.v[2])
@@ -152,7 +159,7 @@ def cli(ip: str, timeout: float):
 
     # controller
     cmd.robot_mode(rm.MODE_CHASSIS_LEAD)
-    hub.worker(rm.Mind, 'controller', ((), ip, control))
+    hub.worker(rm.Mind, 'controller', ((), ip, control), {'loop': False})
 
     hub.run()
 
