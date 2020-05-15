@@ -11,7 +11,6 @@ from typing import List, Callable, Tuple, Optional, Iterator
 import cv2 as cv
 
 CTX = mp.get_context('spawn')
-Manager: mp.managers.SyncManager = CTX.Manager()
 LOG_LEVEL = logging.DEBUG
 
 VIDEO_PORT: int = 40921
@@ -987,8 +986,8 @@ class Vision(Worker):
 
 
 class Mind(Worker):
-    def __init__(self, name: str, queues: Tuple[mp.Queue, ...], ip: str, processing: Callable[..., None], timeout: float = 30):
-        super().__init__(name, None, None, (ip, VIDEO_PORT), timeout)
+    def __init__(self, name: str, queues: Tuple[mp.Queue, ...], ip: str, processing: Callable[..., None], timeout: float = 30, loop: bool = True):
+        super().__init__(name, None, None, (ip, VIDEO_PORT), timeout, loop=loop)
         self._queues = queues
         self._processing = processing
         self._cmd = Commander(ip, timeout)

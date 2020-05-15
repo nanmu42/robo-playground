@@ -11,6 +11,7 @@ from pynput import keyboard
 from pynput.keyboard import Key, KeyCode
 
 import robomaster as rm
+from robomaster import CTX
 
 QUEUE_SIZE: int = 10
 PUSH_FREQUENCY: int = 1
@@ -135,6 +136,8 @@ def control(cmd: rm.Commander, logger: logging.Logger, **kwargs) -> None:
 @click.option('--ip', default='', type=str, help='(Optional) IP of Robomaster EP')
 @click.option('--timeout', default=10.0, type=float, help='(Optional) Timeout for commands')
 def cli(ip: str, timeout: float):
+    manager: mp.managers.SyncManager = CTX.Manager()
+
     hub = rm.Hub()
     cmd = rm.Commander(ip=ip, timeout=timeout)
     ip = cmd.get_ip()
@@ -149,8 +152,8 @@ def cli(ip: str, timeout: float):
     cmd.armor_sensitivity(10)
     cmd.armor_event(rm.ARMOR_HIT, True)
     cmd.sound_event(rm.SOUND_APPLAUSE, True)
-    push_queue = rm.Manager.Queue(QUEUE_SIZE)
-    event_queue = rm.Manager.Queue(QUEUE_SIZE)
+    push_queue = manager.Queue(QUEUE_SIZE)
+    event_queue = manager.Queue(QUEUE_SIZE)
     hub.worker(rm.PushListener, 'push', (push_queue,))
     hub.worker(rm.EventListener, 'event', (event_queue, ip))
 
