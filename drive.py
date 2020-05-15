@@ -3,7 +3,7 @@ import multiprocessing as mp
 import pickle
 import queue
 import threading
-from typing import Tuple
+from typing import Tuple, List
 
 import click
 import cv2 as cv
@@ -46,10 +46,10 @@ class Controller:
         self._mu = threading.Lock()
         self.cmd = cmd
         self.logger = logger
-        self.vx: float = 0.0
-        self.vy: float = 0.0
-        self.vz: float = 0.0
+        self.v: List[float, float, float] = [0, 0, 0]
+        self.previous_v: List[float, float, float] = [0, 0, 0]
         self.v_pitch: float = 0.0
+        self.previous_v_pitch: float = 0.0
 
     def on_press(self, key):
         with self._mu:
@@ -59,21 +59,21 @@ class Controller:
 
             self.logger.debug('pressed: %s', key)
             if key == KeyCode(char='w'):
-                self.vx = self.DELTA_SPEED
+                self.v[0] = self.DELTA_SPEED
             elif key == KeyCode(char='s'):
-                self.vx = -self.DELTA_SPEED
+                self.v[0] = -self.DELTA_SPEED
             elif key == KeyCode(char='a'):
-                self.vy = -self.DELTA_SPEED
+                self.v[1] = -self.DELTA_SPEED
             elif key == KeyCode(char='d'):
-                self.vy = self.DELTA_SPEED
+                self.v[1] = self.DELTA_SPEED
             elif key == Key.up:
                 self.v_pitch = self.DELTA_DEGREE
             elif key == Key.down:
                 self.v_pitch = -self.DELTA_DEGREE
             elif key == Key.left:
-                self.vz = -self.DELTA_DEGREE
+                self.v[2] = -self.DELTA_DEGREE
             elif key == Key.right:
-                self.vz = self.DELTA_DEGREE
+                self.v[2] = self.DELTA_DEGREE
 
             self.send_command()
 
@@ -81,32 +81,36 @@ class Controller:
         with self._mu:
             if key == Key.esc:
                 # stop listener
-                self.vx: float = 0.0
-                self.vy: float = 0.0
-                self.vz: float = 0.0
+                self.v[0]: float = 0.0
+                self.v[1]: float = 0.0
+                self.v[2]: float = 0.0
                 self.v_pitch: float = 0.0
                 self.send_command()
                 return False
 
             self.logger.debug('released: %s', key)
             if key in (KeyCode(char='w'), KeyCode(char='s')):
-                self.vx = 0
+                self.v[0] = 0
             elif key in (KeyCode(char='a'), KeyCode(char='d')):
-                self.vy = 0
+                self.v[1] = 0
             elif key in (Key.up, Key.down):
                 self.v_pitch = 0
             elif key in (Key.left, Key.right):
-                self.vz = 0
+                self.v[2] = 0
 
             self.send_command()
 
     def send_command(self):
-        self.logger.debug('x: %s, y: %s, z: %s, pitch: %s', self.vx, self.vy, self.vz, self.v_pitch)
-        if not any((self.vx, self.vy, self.vz)):
-            self.cmd.chassis_wheel(0, 0, 0, 0)
-        else:
-            self.cmd.chassis_speed(self.vx, self.vy, self.vz)
-        self.cmd.gimbal_speed(self.v_pitch, 0)
+        if self.v != self.previous_v:
+            self.previous_v = [*self.v]
+            self.logger.debug('x: %s, y: %s, z: %s', self.v[0], self.v[1], self.v[2])
+            if not any(self.v):
+                self.cmd.chassis_wheel(0, 0, 0, 0)
+            else:
+                self.cmd.chassis_speed(self.v[0], self.v[1], self.v[2])
+        if self.v_pitch != self.previous_v_pitch:
+            self.previous_v_pitch = self.v_pitch
+            self.cmd.gimbal_speed(self.v_pitch, self.v[2])
 
 
 def control(cmd: rm.Commander, logger: logging.Logger, **kwargs) -> None:
