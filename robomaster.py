@@ -1,5 +1,6 @@
 import logging
 import multiprocessing as mp
+import queue
 import signal
 import socket
 import sys
@@ -10,7 +11,7 @@ from typing import List, Callable, Tuple, Optional, Iterator
 import cv2 as cv
 
 CTX = mp.get_context('spawn')
-Manager = CTX.Manager()
+Manager: mp.managers.SyncManager = CTX.Manager()
 LOG_LEVEL = logging.DEBUG
 
 VIDEO_PORT: int = 40921
@@ -652,7 +653,9 @@ class Commander:
 
 
 class Worker:
-    def __init__(self, name: str, out: Optional[mp.Queue], protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float]):
+    QUEUE_TIMEOUT: float = 0.05
+
+    def __init__(self, name: str, out: Optional[mp.Queue], protocol: Optional[str], address: Tuple[str, int], timeout: Optional[float], loop: bool = True):
         assert name is not None and name != '', 'choose a good name to make life easier'
 
         self._mu = CTX.Lock()
@@ -669,17 +672,18 @@ class Worker:
             formatter = logging.Formatter('%(asctime)s %(name)-12s : %(levelname)-8s %(message)s')
             handler.setFormatter(formatter)
             self._logger.addHandler(handler)
+            self._loop: bool = loop
 
             if protocol == 'tcp':
-                self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._conn: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self._conn.settimeout(timeout)
                 self._conn.connect(self._address)
             elif protocol == 'udp':
-                self._conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self._conn: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 self._conn.settimeout(timeout)
                 self._conn.bind(self._address)
             elif protocol is None:
-                self._conn = None
+                self._conn: Optional[socket.socket] = None
                 pass
             else:
                 raise ValueError(f'unknown protocol {protocol}')
@@ -707,7 +711,10 @@ class Worker:
 
     def __call__(self) -> None:
         try:
-            while not self._closed:
+            if self._loop:
+                while not self._closed:
+                    self.work()
+            else:
                 self.work()
         finally:
             self.close()
@@ -724,7 +731,12 @@ class Worker:
 
     def _outlet(self, payload):
         self._assert_ready()
-        self._out.put(payload)
+        while not self._closed:
+            try:
+                self._out.put(payload, block=True, timeout=self.QUEUE_TIMEOUT)
+            except queue.Full:
+                continue
+            break
 
     def get_address(self) -> Tuple[str, int]:
         return self._address

@@ -12,7 +12,10 @@ from pynput.keyboard import Key, KeyCode
 
 import robomaster as rm
 
-QUEUE_SIZE: int = 3
+QUEUE_SIZE: int = 10
+PUSH_FREQUENCY: int = 1
+TIMEOUT_UNIT: float = 0.1
+QUEUE_TIMEOUT: float = TIMEOUT_UNIT / PUSH_FREQUENCY
 
 
 def display(frame, **kwargs) -> None:
@@ -23,13 +26,13 @@ def display(frame, **kwargs) -> None:
 def handle_event(cmd: rm.Commander, queues: Tuple[mp.Queue, ...], logger: logging.Logger) -> None:
     push_queue, event_queue = queues
     try:
-        push = push_queue.get_nowait()
+        push = push_queue.get(timeout=QUEUE_TIMEOUT)
         logger.info('push: %s', push)
     except queue.Empty:
         pass
 
     try:
-        event = event_queue.get()
+        event = event_queue.get(timeout=QUEUE_TIMEOUT)
         # safety first
         if type(event) == rm.ArmorHitEvent:
             cmd.chassis_wheel(0, 0, 0, 0)
@@ -134,12 +137,13 @@ def cli(ip: str, timeout: float):
     hub.worker(rm.Vision, 'vision', (None, ip, display))
 
     # push and event
-    cmd.chassis_push_on(1, 1, 1)
-    cmd.gimbal_push_on(1)
+    cmd.chassis_push_on(PUSH_FREQUENCY, PUSH_FREQUENCY, PUSH_FREQUENCY)
+    cmd.gimbal_push_on(PUSH_FREQUENCY)
+    cmd.armor_sensitivity(10)
     cmd.armor_event(rm.ARMOR_HIT, True)
     cmd.sound_event(rm.SOUND_APPLAUSE, True)
-    push_queue = rm.CTX.Queue(QUEUE_SIZE)
-    event_queue = rm.CTX.Queue(QUEUE_SIZE)
+    push_queue = rm.Manager.Queue(QUEUE_SIZE)
+    event_queue = rm.Manager.Queue(QUEUE_SIZE)
     hub.worker(rm.PushListener, 'push', (push_queue,))
     hub.worker(rm.EventListener, 'event', (event_queue, ip))
 
