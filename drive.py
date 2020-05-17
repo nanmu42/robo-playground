@@ -13,6 +13,9 @@ from pynput.keyboard import Key, KeyCode
 import robomaster as rm
 from robomaster import CTX
 
+rm.LOG_LEVEL = logging.INFO
+pickle.DEFAULT_PROTOCOL = pickle.HIGHEST_PROTOCOL
+
 QUEUE_SIZE: int = 10
 PUSH_FREQUENCY: int = 1
 TIMEOUT_UNIT: float = 0.1
@@ -43,18 +46,22 @@ def handle_event(cmd: rm.Commander, queues: Tuple[mp.Queue, ...], logger: loggin
 
 
 class Controller:
-    DELTA_SPEED: float = 0.2
-    DELTA_DEGREE: float = 20
+    UNIT_DELTA_SPEED: float = 0.2
+    UNIT_DELTA_DEGREE: float = 20
 
     def __init__(self, cmd: rm.Commander, logger: logging.Logger):
         self._mu = threading.Lock()
-        self.cmd = cmd
-        self.logger = logger
-        self.v: List[float, float] = [0, 0]
-        self.previous_v: List[float, float] = [0, 0]
-        self.v_gimbal: List[float, float] = [0, 0]
-        self.previous_v_gimbal: List[float, float] = [0, 0]
-        self.ctrl_pressed: bool = False
+        with self._mu:
+            self.gear: int = 1
+            self.delta_v: float = self.UNIT_DELTA_SPEED
+            self.delta_d: float = self.UNIT_DELTA_DEGREE
+            self.cmd = cmd
+            self.logger = logger
+            self.v: List[float, float] = [0, 0]
+            self.previous_v: List[float, float] = [0, 0]
+            self.v_gimbal: List[float, float] = [0, 0]
+            self.previous_v_gimbal: List[float, float] = [0, 0]
+            self.ctrl_pressed: bool = False
 
     def on_press(self, key):
         with self._mu:
@@ -73,28 +80,47 @@ class Controller:
 
             self.logger.debug('pressed: %s', key)
             if key == KeyCode(char='w'):
-                self.v[0] = self.DELTA_SPEED
+                self.v[0] = self.delta_v
             elif key == KeyCode(char='s'):
-                self.v[0] = -self.DELTA_SPEED
+                self.v[0] = -self.delta_v
             elif key == KeyCode(char='a'):
-                self.v[1] = -self.DELTA_SPEED
+                self.v[1] = -self.delta_v
             elif key == KeyCode(char='d'):
-                self.v[1] = self.DELTA_SPEED
+                self.v[1] = self.delta_v
             elif key == Key.up:
-                self.v_gimbal[0] = self.DELTA_DEGREE
+                self.v_gimbal[0] = self.delta_d
             elif key == Key.down:
-                self.v_gimbal[0] = -self.DELTA_DEGREE
+                self.v_gimbal[0] = -self.delta_d
             elif key == Key.left:
-                self.v_gimbal[1] = -self.DELTA_DEGREE
+                self.v_gimbal[1] = -self.delta_d
             elif key == Key.right:
-                self.v_gimbal[1] = self.DELTA_DEGREE
+                self.v_gimbal[1] = self.delta_d
 
             self.send_command()
+
+    def _update_gear(self, gear: int):
+        self.gear = gear
+        self.delta_v = self.gear * self.UNIT_DELTA_SPEED
+        self.delta_d = self.gear * self.UNIT_DELTA_DEGREE
 
     def on_release(self, key):
         with self._mu:
             if key == Key.ctrl:
                 self.ctrl_pressed = False
+                return
+
+            # gears
+            if key == KeyCode(char='1'):
+                self._update_gear(1)
+                return
+            if key == KeyCode(char='2'):
+                self._update_gear(2)
+                return
+            if key == KeyCode(char='3'):
+                self._update_gear(3)
+                return
+            if key == KeyCode(char='4'):
+                self._update_gear(4)
                 return
 
             self.logger.debug('released: %s', key)
@@ -134,38 +160,38 @@ def control(cmd: rm.Commander, logger: logging.Logger, **kwargs) -> None:
 def cli(ip: str, timeout: float):
     manager: mp.managers.SyncManager = CTX.Manager()
 
-    hub = rm.Hub()
-    cmd = rm.Commander(ip=ip, timeout=timeout)
-    ip = cmd.get_ip()
+    with manager:
+        hub = rm.Hub()
+        cmd = rm.Commander(ip=ip, timeout=timeout)
+        ip = cmd.get_ip()
 
-    # reset
-    cmd.robot_mode(rm.MODE_GIMBAL_LEAD)
-    cmd.gimbal_recenter()
+        # reset
+        cmd.robot_mode(rm.MODE_GIMBAL_LEAD)
+        cmd.gimbal_recenter()
 
-    # vision
-    cmd.stream(True)
-    hub.worker(rm.Vision, 'vision', (None, ip, display))
+        # vision
+        cmd.stream(True)
+        hub.worker(rm.Vision, 'vision', (None, ip, display))
 
-    # push and event
-    cmd.chassis_push_on(PUSH_FREQUENCY, PUSH_FREQUENCY, PUSH_FREQUENCY)
-    cmd.gimbal_push_on(PUSH_FREQUENCY)
-    cmd.armor_sensitivity(10)
-    cmd.armor_event(rm.ARMOR_HIT, True)
-    cmd.sound_event(rm.SOUND_APPLAUSE, True)
-    push_queue = manager.Queue(QUEUE_SIZE)
-    event_queue = manager.Queue(QUEUE_SIZE)
-    hub.worker(rm.PushListener, 'push', (push_queue,))
-    hub.worker(rm.EventListener, 'event', (event_queue, ip))
+        # push and event
+        cmd.chassis_push_on(PUSH_FREQUENCY, PUSH_FREQUENCY, PUSH_FREQUENCY)
+        cmd.gimbal_push_on(PUSH_FREQUENCY)
+        cmd.armor_sensitivity(10)
+        cmd.armor_event(rm.ARMOR_HIT, True)
+        cmd.sound_event(rm.SOUND_APPLAUSE, True)
+        push_queue = manager.Queue(QUEUE_SIZE)
+        event_queue = manager.Queue(QUEUE_SIZE)
+        hub.worker(rm.PushListener, 'push', (push_queue,))
+        hub.worker(rm.EventListener, 'event', (event_queue, ip))
 
-    # push and event handler
-    hub.worker(rm.Mind, 'event-handler', ((push_queue, event_queue), ip, handle_event))
+        # push and event handler
+        hub.worker(rm.Mind, 'event-handler', ((push_queue, event_queue), ip, handle_event))
 
-    # controller
-    hub.worker(rm.Mind, 'controller', ((), ip, control), {'loop': False})
+        # controller
+        hub.worker(rm.Mind, 'controller', ((), ip, control), {'loop': False})
 
-    hub.run()
+        hub.run()
 
 
 if __name__ == '__main__':
-    pickle.DEFAULT_PROTOCOL = pickle.HIGHEST_PROTOCOL
     cli()
