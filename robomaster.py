@@ -699,7 +699,7 @@ class Worker:
             self.get_logger().info('signal received, closing...')
             if self._conn is not None:
                 self._conn.close()
-            if self._out is not None:
+            if self._out is not None and type(self._out) == mp.Queue:
                 self._out.close()
 
     def get_name(self) -> str:
@@ -715,6 +715,9 @@ class Worker:
                     self.work()
             else:
                 self.work()
+        except EOFError:
+            if not self._closed:
+                raise
         finally:
             self.close()
 
@@ -818,7 +821,10 @@ class Hub:
         signal.sigwait((signal.SIGINT, signal.SIGTERM))
         self.close()
         for worker in self._workers:
-            worker.close()
+            try:
+                worker.close()
+            except Exception as e:
+                logging.error('[resource leak warning] failed to close process "%s": %s', worker._name, e)
 
 
 class PushListener(Worker):
@@ -889,7 +895,13 @@ class PushListener(Worker):
             raise ValueError(f'unknown chassis push subtype {subtype}, context: {words}')
 
     def work(self) -> None:
-        msg = self._intake(DEFAULT_BUF_SIZE).decode()
+        try:
+            msg = self._intake(DEFAULT_BUF_SIZE).decode()
+        except OSError:
+            if self._closed:
+                return
+            else:
+                raise
         payloads = self._parse(msg)
         for payload in payloads:
             self._outlet(payload)
@@ -957,7 +969,13 @@ class EventListener(Worker):
             raise ValueError(f'unknown sound event subtype {subtype}, context: {words}')
 
     def work(self) -> None:
-        msg = self._intake(DEFAULT_BUF_SIZE).decode()
+        try:
+            msg = self._intake(DEFAULT_BUF_SIZE).decode()
+        except OSError:
+            if self._closed:
+                return
+            else:
+                raise
         payloads = self._parse(msg)
         for payload in payloads:
             self._outlet(payload)
@@ -979,7 +997,11 @@ class Vision(Worker):
 
     def work(self) -> None:
         ok, frame = self._cap.read()
-        assert ok, 'can not receive frame (stream end?)'
+        if not ok:
+            if self._closed:
+                return
+            else:
+                raise ValueError('can not receive frame (stream end?)')
         processed = self._processing(frame=frame, logger=self.get_logger())
         if processed is not None:
             self._outlet(processed)

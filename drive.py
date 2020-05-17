@@ -36,7 +36,7 @@ def handle_event(cmd: rm.Commander, queues: Tuple[mp.Queue, ...], logger: loggin
         event = event_queue.get(timeout=QUEUE_TIMEOUT)
         # safety first
         if type(event) == rm.ArmorHitEvent:
-            cmd.chassis_wheel(0, 0, 0, 0)
+            cmd.chassis_speed(0, 0, 0)
         logger.info('event: %s', event)
     except queue.Empty:
         pass
@@ -50,10 +50,10 @@ class Controller:
         self._mu = threading.Lock()
         self.cmd = cmd
         self.logger = logger
-        self.v: List[float, float, float] = [0, 0, 0]
-        self.previous_v: List[float, float, float] = [0, 0, 0]
-        self.v_pitch: float = 0.0
-        self.previous_v_pitch: float = 0.0
+        self.v: List[float, float] = [0, 0]
+        self.previous_v: List[float, float] = [0, 0]
+        self.v_gimbal: List[float, float] = [0, 0]
+        self.previous_v_gimbal: List[float, float] = [0, 0]
         self.ctrl_pressed: bool = False
 
     def on_press(self, key):
@@ -63,10 +63,8 @@ class Controller:
                 return
             if self.ctrl_pressed and key == KeyCode(char='c'):
                 # stop listener
-                self.v[0]: float = 0.0
-                self.v[1]: float = 0.0
-                self.v[2]: float = 0.0
-                self.v_pitch: float = 0.0
+                self.v = [0, 0]
+                self.v_gimbal = [0, 0]
                 self.send_command()
                 return False
             if key == Key.space:
@@ -83,13 +81,13 @@ class Controller:
             elif key == KeyCode(char='d'):
                 self.v[1] = self.DELTA_SPEED
             elif key == Key.up:
-                self.v_pitch = self.DELTA_DEGREE
+                self.v_gimbal[0] = self.DELTA_DEGREE
             elif key == Key.down:
-                self.v_pitch = -self.DELTA_DEGREE
+                self.v_gimbal[0] = -self.DELTA_DEGREE
             elif key == Key.left:
-                self.v[2] = -self.DELTA_DEGREE
+                self.v_gimbal[1] = -self.DELTA_DEGREE
             elif key == Key.right:
-                self.v[2] = self.DELTA_DEGREE
+                self.v_gimbal[1] = self.DELTA_DEGREE
 
             self.send_command()
 
@@ -105,23 +103,21 @@ class Controller:
             elif key in (KeyCode(char='a'), KeyCode(char='d')):
                 self.v[1] = 0
             elif key in (Key.up, Key.down):
-                self.v_pitch = 0
+                self.v_gimbal[0] = 0
             elif key in (Key.left, Key.right):
-                self.v[2] = 0
+                self.v_gimbal[1] = 0
 
             self.send_command()
 
     def send_command(self):
         if self.v != self.previous_v:
             self.previous_v = [*self.v]
-            self.logger.debug('x: %s, y: %s, z: %s', self.v[0], self.v[1], self.v[2])
-            if any(self.v):
-                self.cmd.chassis_speed(self.v[0], self.v[1], self.v[2])
-            else:
-                self.cmd.chassis_wheel(0, 0, 0, 0)
-        if self.v_pitch != self.previous_v_pitch:
-            self.previous_v_pitch = self.v_pitch
-            self.cmd.gimbal_speed(self.v_pitch, self.v[2])
+            self.logger.debug('chassis speed: x: %s, y: %s', self.v[0], self.v[1])
+            self.cmd.chassis_speed(self.v[0], self.v[1], 0)
+        if self.v_gimbal != self.previous_v_gimbal:
+            self.logger.debug('gimbal speed: pitch: %s, yaw: %s', self.v_gimbal[0], self.v_gimbal[1])
+            self.previous_v_gimbal = [*self.v_gimbal]
+            self.cmd.gimbal_speed(self.v_gimbal[0], self.v_gimbal[1])
 
 
 def control(cmd: rm.Commander, logger: logging.Logger, **kwargs) -> None:
@@ -142,6 +138,10 @@ def cli(ip: str, timeout: float):
     cmd = rm.Commander(ip=ip, timeout=timeout)
     ip = cmd.get_ip()
 
+    # reset
+    cmd.robot_mode(rm.MODE_GIMBAL_LEAD)
+    cmd.gimbal_recenter()
+
     # vision
     cmd.stream(True)
     hub.worker(rm.Vision, 'vision', (None, ip, display))
@@ -161,7 +161,6 @@ def cli(ip: str, timeout: float):
     hub.worker(rm.Mind, 'event-handler', ((push_queue, event_queue), ip, handle_event))
 
     # controller
-    cmd.robot_mode(rm.MODE_CHASSIS_LEAD)
     hub.worker(rm.Mind, 'controller', ((), ip, control), {'loop': False})
 
     hub.run()
