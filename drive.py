@@ -65,6 +65,8 @@ class Controller:
 
     def on_press(self, key):
         with self._mu:
+            self.logger.debug('pressed: %s', key)
+
             if key == Key.ctrl:
                 self.ctrl_pressed = True
                 return
@@ -78,7 +80,6 @@ class Controller:
                 self.cmd.blaster_fire()
                 return
 
-            self.logger.debug('pressed: %s', key)
             if key == KeyCode(char='w'):
                 self.v[0] = self.delta_v
             elif key == KeyCode(char='s'):
@@ -105,25 +106,17 @@ class Controller:
 
     def on_release(self, key):
         with self._mu:
+            self.logger.debug('released: %s', key)
+
             if key == Key.ctrl:
                 self.ctrl_pressed = False
                 return
 
             # gears
-            if key == KeyCode(char='1'):
-                self._update_gear(1)
-                return
-            if key == KeyCode(char='2'):
-                self._update_gear(2)
-                return
-            if key == KeyCode(char='3'):
-                self._update_gear(3)
-                return
-            if key == KeyCode(char='4'):
-                self._update_gear(4)
+            if key in (KeyCode(char='1'), KeyCode(char='2'), KeyCode(char='3'), KeyCode(char='4'), KeyCode(char='5')):
+                self._update_gear(int(key.char()))
                 return
 
-            self.logger.debug('released: %s', key)
             if key in (KeyCode(char='w'), KeyCode(char='s')):
                 self.v[0] = 0
             elif key in (KeyCode(char='a'), KeyCode(char='d')):
