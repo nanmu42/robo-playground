@@ -615,7 +615,7 @@ class Commander:
         :return: 指定 ID 的红外传感器测得的距离值，单位 mm
         """
         assert 1 <= id <= 4, f'invalid IR sensor id {id}'
-        resp = self.do('ir_distance_sensor', 'distance', id)
+        resp = self.do('ir_distance_sensor', 'distance', id, '?')
         return int(resp)
 
     def stream(self, switch: bool) -> str:
@@ -1009,7 +1009,7 @@ class Vision(Worker):
 
 class Mind(Worker):
     def __init__(self, name: str, queues: Tuple[mp.Queue, ...], ip: str, processing: Callable[..., None], timeout: float = 30, loop: bool = True):
-        super().__init__(name, None, None, (ip, VIDEO_PORT), timeout, loop=loop)
+        super().__init__(name, None, None, (ip, 0), timeout, loop=loop)
         self._queues = queues
         self._processing = processing
         self._cmd = Commander(ip, timeout)
