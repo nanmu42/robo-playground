@@ -114,7 +114,7 @@ class Controller:
 
             # gears
             if key in (KeyCode(char='1'), KeyCode(char='2'), KeyCode(char='3'), KeyCode(char='4'), KeyCode(char='5')):
-                self._update_gear(int(key.char()))
+                self._update_gear(int(key.char))
                 return
 
             if key in (KeyCode(char='w'), KeyCode(char='s')):
