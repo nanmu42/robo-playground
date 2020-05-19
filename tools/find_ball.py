@@ -46,7 +46,7 @@ def process(frame: np.ndarray):
 
     ((x, y), radius) = cv.minEnclosingCircle(ball_cnt)
     cv.circle(frame, (int(x), int(y)), int(radius), (0, 255, 0), 2)
-    cv.circle(frame, (int(x), int(y)), 4, (0, 0, 255), 2)
+    cv.circle(frame, (int(x), int(y)), 1, (0, 0, 255), 2)
 
     cv.imshow('circle', frame)
 
