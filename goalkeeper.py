@@ -50,7 +50,7 @@ class KeeperMind(rm.Worker):
         self._position: rm.ChassisPosition = rm.ChassisPosition(0, 0, 0)
 
         self._cmd = rm.Commander(ip, timeout)
-        self._cmd.gimbal_moveto(-10)
+        self._cmd.gimbal_moveto(pitch=-10)
 
         self._init_state()
 
