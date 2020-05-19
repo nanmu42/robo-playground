@@ -44,7 +44,7 @@ def process(frame: np.ndarray):
     ball_cnt = biggest_circle_cnt(cnts)
     assert ball_cnt is not None, 'failed to find ball'
 
-    ((x, y), radius) = cv.minEnclosingCircle(ball_cnt)
+    (x, y), radius = cv.minEnclosingCircle(ball_cnt)
     cv.circle(frame, (int(x), int(y)), int(radius), (0, 255, 0), 2)
     cv.circle(frame, (int(x), int(y)), 1, (0, 0, 255), 2)
 
