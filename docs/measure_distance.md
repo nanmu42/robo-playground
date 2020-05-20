@@ -8,7 +8,7 @@ Per Pinhole camera model, we have:
 
 thus,
 
-`actual size` = `size on camera sensor` * `distance` / `focal length`
+`distance` = `focal length` * `actual size` / `size on camera sensor`
 
 if we need `focal length`:
 
