@@ -24,6 +24,8 @@ GREEN_UPPER = (64, 255, 255)
 BALL_ACTUAL_RADIUS = 0.065 / 2
 
 QUEUE_TIMEOUT: float = 0.5
+QUEUE_SIZE: int = 10
+SYSTEM_FREQUENCY: int = 30
 
 
 @enum.unique
@@ -67,7 +69,7 @@ class KeeperMind(rm.Worker):
         self._vision = vision
         self._push = push
         self._event = event
-        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.05, -0.5, setpoint=0, sample_time=1 / 30, output_limits=(-self.DEFAULT_XY_SPEED, self.DEFAULT_XY_SPEED))
+        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.05, -0.5, setpoint=0, sample_time=1.0 / SYSTEM_FREQUENCY, output_limits=(-self.DEFAULT_XY_SPEED, self.DEFAULT_XY_SPEED))
 
         if field_width > field_depth:
             self._graph_pixel_size: float = 0.8 * self.GRAPH_SIZE / field_width  # pixel per meter
@@ -385,7 +387,33 @@ def ensure_field(ctx: click.Context):
 @cli.command()
 @click.pass_context
 def play(ctx: click.Context):
-    pass
+    manager: mp.managers.SyncManager = CTX.Manager()
+
+    with manager:
+        hub = rm.Hub()
+        cmd = rm.Commander(ip=ctx.obj['ip'], timeout=ctx.obj['timeout'])
+        ip = cmd.get_ip()
+
+        # queues
+        vision_queue = manager.Queue(QUEUE_SIZE)
+        push_queue = manager.Queue(QUEUE_SIZE)
+        event_queue = manager.Queue(QUEUE_SIZE)
+
+        # vision
+        cmd.stream(True)
+        hub.worker(rm.Vision, 'vision', (vision_queue, ip, vision))
+
+        # push and event
+        cmd.chassis_push_on(position_freq=SYSTEM_FREQUENCY, attitude_freq=SYSTEM_FREQUENCY)
+        cmd.armor_sensitivity(10)
+        cmd.armor_event(rm.ARMOR_HIT, True)
+        hub.worker(rm.PushListener, 'chassis-push', (push_queue,))
+        hub.worker(rm.EventListener, 'armor-event', (event_queue, ip))
+
+        # controller
+        hub.worker(KeeperMind, 'keeper', (ip, vision_queue, push_queue, event_queue, ctx.obj['max_width'], ctx.obj['max_depth'], ctx.obj['timeout']))
+
+        hub.run()
 
 
 if __name__ == '__main__':
