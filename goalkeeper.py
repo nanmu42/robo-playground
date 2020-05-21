@@ -9,6 +9,7 @@ from typing import Tuple, List, Optional
 
 import click
 import cv2 as cv
+import numpy as np
 import simple_pid
 
 import measure
@@ -54,6 +55,7 @@ class KeeperMind(rm.Worker):
     DEGREE_EPS: float = 2.0  # in degrees
     DISTANCE_EPS: float = 0.01  # in meters
     SLEEP_SECONDS: float = 1.0
+    GRAPH_SIZE: int = 1000
 
     def __init__(self, name: str, ip: str,
                  vision: mp.Queue, push: mp.Queue, event: mp.Queue,
@@ -66,6 +68,16 @@ class KeeperMind(rm.Worker):
         self._push = push
         self._event = event
         self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.05, -0.5, setpoint=0, sample_time=1 / 30, output_limits=(-self.DEFAULT_XY_SPEED, self.DEFAULT_XY_SPEED))
+
+        if field_width > field_depth:
+            self._graph_pixel_size: float = 0.8 * self.GRAPH_SIZE / field_width  # pixel per meter
+        else:
+            self._graph_pixel_size: float = 0.8 * self.GRAPH_SIZE / field_depth  # pixel per meter
+        self._graph_chassis_width = self._graph_pixel_size * measure.INFANTRY_WIDTH
+        self._graph_chassis_length = self._graph_pixel_size * measure.INFANTRY_LENGTH
+        self._graph_ball_radius = BALL_ACTUAL_RADIUS * self._graph_pixel_size
+        self._graph_base = np.zeros((self.GRAPH_SIZE, self.GRAPH_SIZE), dtype=np.uint8)
+        cv.rectangle(self._graph_base, self._graph_offset(-0.8 * 0.5 * field_width, -0.8 * 0.5 * field_depth), self._graph_offset(0.8 * 0.5 * field_width, 0.8 * 0.5 * field_depth), (255, 0, 0), 4)
 
         # dynamic states
         self._position: rm.ChassisPosition = rm.ChassisPosition(0, 0, 0)
@@ -80,6 +92,10 @@ class KeeperMind(rm.Worker):
         self._cmd.gimbal_moveto(pitch=-10)
 
         self._init_state()
+
+    def _graph_offset(self, x: float, y: float) -> Tuple[float, float]:
+        center = 0.5 * self.GRAPH_SIZE
+        return center + x, center + y
 
     def close(self):
         self._cmd.close()
@@ -242,7 +258,32 @@ class KeeperMind(rm.Worker):
             self._cmd.chassis_speed(x=self.DEFAULT_XY_SPEED)
 
     def _draw_graph(self):
-        pass
+        if self._ball_distances is None:
+            return
+
+        graph = self._graph_base.copy()
+
+        chassis_x = self._position.y
+        chassis_y = -self._position.x
+        chassis_x_pixel = chassis_x * self._graph_pixel_size
+        chassis_y_pixel = chassis_y * self._graph_pixel_size
+        cv.rectangle(graph, (chassis_x_pixel - self._graph_chassis_width, chassis_y_pixel - self._graph_chassis_length), (chassis_x_pixel + self._graph_chassis_width, chassis_y_pixel + self._graph_chassis_length), (0, 0, 255), 2)
+
+        forward, lateral, _ = self._ball_distances
+        ball_x_pixel = (lateral + chassis_x) * self._graph_pixel_size
+        ball_y_pixel = (chassis_y - forward) * self._graph_pixel_size
+
+        cv.circle(graph, (ball_x_pixel, ball_y_pixel), self._graph_ball_radius, (0, 255, 0), 2)
+        cv.circle(graph, (ball_x_pixel, ball_y_pixel), 1, (0, 128, 128), 2)
+        cv.putText(graph, self._state.name, (20, 20), cv.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)
+
+        now = time.time()
+        cv.putText(graph, 'vision heath: %.2f ms' % (now - self._ball_last_seen) * 1000 if self._ball_last_seen is not None else -1, (20, 70), cv.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
+        cv.putText(graph, 'position heath: %.2f ms' % (now - self._position_last_seen) * 1000 if self._ball_last_seen is not None else -1, (20, 120), cv.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
+        cv.putText(graph, 'hit last seen: %.2f ms' % (now - self._armor_hit_last_seen) * 1000 if self._ball_last_seen is not None else -1, (20, 70), cv.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
+
+        cv.imshow('graph', graph)
+        cv.waitKey(1)
 
     def _tick(self):
         self._armor_hit_last_seen = None
@@ -251,6 +292,8 @@ class KeeperMind(rm.Worker):
         self._drain_push()
         self._drain_event()
         self._drain_vision()
+
+        self._draw_graph()
 
     def work(self) -> None:
         self._tick()
@@ -306,7 +349,7 @@ def vision(frame, logger: logging.Logger) -> Optional[Tuple[float, float]]:
 
     (x, y), pixel_radius = cv.minEnclosingCircle(ball_cnt)
     distance = measure.pinhole_distance(BALL_ACTUAL_RADIUS, pixel_radius)
-    forward, lateral = measure.distance_decomposition(x, distance)
+    forward, lateral, _ = measure.distance_decomposition(x, distance)
     cv.circle(frame, (x, y), pixel_radius, (0, 255, 0), 2)
     cv.circle(frame, (x, y), 1, (0, 0, 255), 2)
     cv.putText(frame, 'forward: %.1f cm' % forward * 100, (50, 20), cv.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)

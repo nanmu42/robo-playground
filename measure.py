@@ -7,6 +7,14 @@ HORIZONTAL_PIXELS: float = 1280
 VERTICAL_DEGREES: float = 54
 VERTICAL_PIXELS: float = 720
 
+INFANTRY_LENGTH: float = 0.32
+INFANTRY_WIDTH: float = 0.24
+INFANTRY_HEIGHT: float = 0.27
+
+ENGINEERING_LENGTH: float = 0.41
+ENGINEERING_WIDTH: float = 0.24
+ENGINEERING_HEIGHT: float = 0.33
+
 
 def pinhole_distance(actual_size: float, pixel_size: float, focal_length: float = FOCAL_LENGTH_HD) -> float:
     """
