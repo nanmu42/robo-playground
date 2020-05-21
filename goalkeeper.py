@@ -2,6 +2,8 @@ import enum
 import logging
 import multiprocessing as mp
 import pickle
+import queue
+import time
 from typing import Tuple, List, Optional
 
 import click
@@ -41,7 +43,8 @@ class KeeperState(enum.IntEnum):
 
 
 class KeeperMind(rm.Worker):
-    PID_PARAMS = (-1, -0.1, -0.05)
+    PID_PARAMS: Tuple[float, float, float] = (-1, -0.1, -0.05)
+    MAX_EVENT_LAPSE: float = 20 / 1000.0
 
     def __init__(self, name: str, ip: str,
                  vision: mp.Queue, push: mp.Queue, event: mp.Queue,
@@ -54,9 +57,14 @@ class KeeperMind(rm.Worker):
         self._push = push
         self._event = event
         self._pid: simple_pid.PID = simple_pid.PID(*self.PID_PARAMS, setpoint=0, sample_time=1 / 30, output_limits=(0, 2.5))
+
+        # dynamic states
         self._position: rm.ChassisPosition = rm.ChassisPosition(0, 0, 0)
+        self._position_last_seen: Optional[float] = None
         self._ball_distances: Optional[Tuple[float, float]] = None
         self._ball_last_seen: Optional[float] = None
+        self._armor_hit_id: Optional[int] = None
+        self._armor_hit_last_seen: Optional[float] = None
 
         self._cmd = rm.Commander(ip, timeout)
         self._cmd.gimbal_moveto(pitch=-10)
@@ -83,6 +91,49 @@ class KeeperMind(rm.Worker):
         else:
             raise ValueError(f'unknown state {self._state}')
 
+    def _drain_vision(self):
+        updated: bool = False
+        while not self._closed:
+            try:
+                self._ball_distances = self._vision.get_nowait()
+                updated = True
+            except queue.Empty:
+                if updated:
+                    self._ball_last_seen = time.time()
+                return
+
+    def _drain_push(self):
+        updated: bool = False
+        while not self._closed:
+            try:
+                push = self._push.get_nowait()
+                updated = True
+                if type(push) == rm.ChassisPosition:
+                    self._position.x, self._position.y = push.x, push.y
+                elif type(push) == rm.ChassisAttitude:
+                    self._position.z = push.yaw
+                else:
+                    raise ValueError(f'unexpected push type {type(push)}, content: {push}')
+            except queue.Empty:
+                if updated:
+                    self._position_last_seen = time.time()
+                return
+
+    def _drain_event(self):
+        updated: bool = False
+        while not self._closed:
+            try:
+                hit = self._event.get_nowait()
+                updated = True
+                if type(hit) == rm.ArmorHitEvent:
+                    self._armor_hit_id = hit.index
+                else:
+                    raise ValueError(f'unexpected push type {type(hit)}, content: {hit}')
+            except queue.Empty:
+                if updated:
+                    self._ball_last_seen = time.time()
+                return
+
     def _watch(self):
         pass
 
@@ -93,7 +144,17 @@ class KeeperMind(rm.Worker):
         pass
 
     def _tick(self):
-        forward, lateral = self._vision.get(block=True, timeout=QUEUE_TIMEOUT)
+        self._drain_push()
+        self._drain_event()
+        self._drain_vision()
+
+        now = time.time()
+        for index, last_seen in (self._position_last_seen, self._armor_hit_last_seen, self._ball_last_seen):
+            if last_seen is None:
+                continue
+            lapse = now - last_seen
+            if lapse > self.MAX_EVENT_LAPSE:
+                self.get_logger().warning('event out of sync, lapse %.3f second(s), index %d', lapse, index)
 
     def work(self) -> None:
         self._tick()
