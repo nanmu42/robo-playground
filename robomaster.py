@@ -690,19 +690,24 @@ class Worker:
     def _handle_close_signal(self, sig, stacks):
         self.close()
 
+    @property
+    def closed(self):
+        return self._closed
+
     def close(self):
         with self._mu:
-            if self._closed:
+            if self.closed:
                 return
 
             self._closed = True
-            self.get_logger().info('signal received, closing...')
+            self.logger.info('signal received, closing...')
             if self._conn is not None:
                 self._conn.close()
             if self._out is not None and type(self._out) == mp.Queue:
                 self._out.close()
 
-    def get_name(self) -> str:
+    @property
+    def name(self) -> str:
         return self._name
 
     def work(self) -> None:
@@ -711,21 +716,22 @@ class Worker:
     def __call__(self) -> None:
         try:
             if self._loop:
-                while not self._closed:
+                while not self.closed:
                     self.work()
             else:
                 self.work()
         except EOFError:
-            if not self._closed:
+            if not self.closed:
                 raise
         finally:
             self.close()
 
-    def get_logger(self):
+    @property
+    def logger(self):
         return self._logger
 
     def _assert_ready(self):
-        assert not self._closed, 'Worker is already closed'
+        assert not self.closed, 'Worker is already closed'
 
     def _intake(self, buf_size: int):
         self._assert_ready()
@@ -733,7 +739,7 @@ class Worker:
 
     def _outlet(self, payload):
         self._assert_ready()
-        while not self._closed:
+        while not self.closed:
             try:
                 self._out.put(payload, block=True, timeout=self.QUEUE_TIMEOUT)
             except queue.Full:
@@ -898,7 +904,7 @@ class PushListener(Worker):
         try:
             msg = self._intake(DEFAULT_BUF_SIZE).decode()
         except OSError:
-            if self._closed:
+            if self.closed:
                 return
             else:
                 raise
@@ -972,7 +978,7 @@ class EventListener(Worker):
         try:
             msg = self._intake(DEFAULT_BUF_SIZE).decode()
         except OSError:
-            if self._closed:
+            if self.closed:
                 return
             else:
                 raise
@@ -998,11 +1004,11 @@ class Vision(Worker):
     def work(self) -> None:
         ok, frame = self._cap.read()
         if not ok:
-            if self._closed:
+            if self.closed:
                 return
             else:
                 raise ValueError('can not receive frame (stream end?)')
-        processed = self._processing(frame=frame, logger=self.get_logger())
+        processed = self._processing(frame=frame, logger=self.logger)
         if processed is not None:
             self._outlet(processed)
 
@@ -1019,4 +1025,4 @@ class Mind(Worker):
         super().close()
 
     def work(self) -> None:
-        self._processing(cmd=self._cmd, queues=self._queues, logger=self.get_logger())
+        self._processing(cmd=self._cmd, queues=self._queues, logger=self.logger)

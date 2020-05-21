@@ -93,7 +93,7 @@ class KeeperMind(rm.Worker):
 
     def _drain_vision(self):
         updated: bool = False
-        while not self._closed:
+        while not self.closed:
             try:
                 self._ball_distances = self._vision.get_nowait()
                 updated = True
@@ -104,7 +104,7 @@ class KeeperMind(rm.Worker):
 
     def _drain_push(self):
         updated: bool = False
-        while not self._closed:
+        while not self.closed:
             try:
                 push = self._push.get_nowait()
                 updated = True
@@ -121,7 +121,7 @@ class KeeperMind(rm.Worker):
 
     def _drain_event(self):
         updated: bool = False
-        while not self._closed:
+        while not self.closed:
             try:
                 hit = self._event.get_nowait()
                 updated = True
@@ -154,7 +154,7 @@ class KeeperMind(rm.Worker):
                 continue
             lapse = now - last_seen
             if lapse > self.MAX_EVENT_LAPSE:
-                self.get_logger().warning('event out of sync, lapse %.3f second(s), index %d', lapse, index)
+                self.logger.warning('event out of sync, lapse %.3f second(s), index %d', lapse, index)
 
     def work(self) -> None:
         self._tick()
