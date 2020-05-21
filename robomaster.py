@@ -294,7 +294,7 @@ class Commander:
         assert self._is_ok(resp), f'chassis_wheel: {resp}'
         return resp
 
-    def chassis_move(self, x: float = 0, y: float = 0, z: int = 0, speed_xy: float = None, speed_z: float = None) -> str:
+    def chassis_move(self, x: float = 0, y: float = 0, z: float = 0, speed_xy: float = None, speed_z: float = None) -> str:
         """
         控制底盘运动当指定位置，坐标轴原点为当前位置
 

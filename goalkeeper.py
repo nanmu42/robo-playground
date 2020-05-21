@@ -1,5 +1,6 @@
 import enum
 import logging
+import math
 import multiprocessing as mp
 import pickle
 import queue
@@ -43,30 +44,39 @@ class KeeperState(enum.IntEnum):
 
 
 class KeeperMind(rm.Worker):
-    PID_PARAMS: Tuple[float, float, float] = (-1, -0.1, -0.05)
-    MAX_EVENT_LAPSE: float = 20 / 1000.0
+    MAX_EVENT_LAPSE: float = 20 / 1000.0  # in seconds
+    DEFAULT_XY_SPEED: float = 2.0
+    DEFAULT_Z_SPEED: float = 180.0
+    BALL_ABSENT_TIMEOUT: float = 8.0
+    KICK_TIMEOUT: float = 0.3
+    CHASE_ENTER_FORWARD_THRESHOLD: float = 1.2
+    CHASE_EXIT_FORWARD_THRESHOLD: float = 1.4
+    DEGREE_EPS: float = 2.0  # in degrees
+    DISTANCE_EPS: float = 0.01  # in meters
+    SLEEP_SECONDS: float = 1.0
 
     def __init__(self, name: str, ip: str,
                  vision: mp.Queue, push: mp.Queue, event: mp.Queue,
                  field_width: float, field_depth: float, timeout: float = 10):
         super().__init__(name, None, None, (ip, 0), timeout, True)
         self._state: KeeperState = KeeperState.WATCHING
-        self._field_width = field_width
-        self._field_depth = field_depth
+        self._max_y = field_width / 2.0
+        self._max_x = field_depth / 2.0
         self._vision = vision
         self._push = push
         self._event = event
-        self._pid: simple_pid.PID = simple_pid.PID(*self.PID_PARAMS, setpoint=0, sample_time=1 / 30, output_limits=(0, 2.5))
+        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.05, -0.5, setpoint=0, sample_time=1 / 30, output_limits=(-self.DEFAULT_XY_SPEED, self.DEFAULT_XY_SPEED))
 
         # dynamic states
         self._position: rm.ChassisPosition = rm.ChassisPosition(0, 0, 0)
         self._position_last_seen: Optional[float] = None
-        self._ball_distances: Optional[Tuple[float, float]] = None
+        self._ball_distances: Optional[Tuple[float, float, float]] = None
         self._ball_last_seen: Optional[float] = None
         self._armor_hit_id: Optional[int] = None
         self._armor_hit_last_seen: Optional[float] = None
 
         self._cmd = rm.Commander(ip, timeout)
+        self._cmd.robot_mode(rm.MODE_CHASSIS_LEAD)
         self._cmd.gimbal_moveto(pitch=-10)
 
         self._init_state()
@@ -79,14 +89,21 @@ class KeeperMind(rm.Worker):
         self._state: KeeperState = self._state.next()
         self._init_state()
 
+    def _reset_state(self):
+        if self._state == KeeperState.WATCHING:
+            return
+        self._state: KeeperState = self._state.origin()
+        self._init_state()
+
     def _init_state(self):
         if self._state == KeeperState.WATCHING:
-            # TODO: 回中，回正
+            self._recenter_to_field()
             self._cmd.led_control(rm.LED_ALL, rm.LED_EFFECT_PULSE, 0, 255, 0)
         elif self._state == KeeperState.CHASING:
-            self._pid.reset()
-            self._cmd.led_control(rm.LED_ALL, rm.LED_EFFECT_BLINK, 0, 0, 255)
+            self._y_pid.reset()
+            self._cmd.led_control(rm.LED_ALL, rm.LED_EFFECT_SOLID, 255, 0, 0)
         elif self._state == KeeperState.KICKING:
+            self._cmd.chassis_move(-self._max_x * 2 / 3, speed_xy=self.DEFAULT_XY_SPEED)
             self._cmd.led_control(rm.LED_ALL, rm.LED_EFFECT_SOLID, 255, 255, 255)
         else:
             raise ValueError(f'unknown state {self._state}')
@@ -113,7 +130,7 @@ class KeeperMind(rm.Worker):
                 elif type(push) == rm.ChassisAttitude:
                     self._position.z = push.yaw
                 else:
-                    raise ValueError(f'unexpected push type {type(push)}, content: {push}')
+                    raise ValueError(f'unexpected push content: {push}')
             except queue.Empty:
                 if updated:
                     self._position_last_seen = time.time()
@@ -128,33 +145,112 @@ class KeeperMind(rm.Worker):
                 if type(hit) == rm.ArmorHitEvent:
                     self._armor_hit_id = hit.index
                 else:
-                    raise ValueError(f'unexpected push type {type(hit)}, content: {hit}')
+                    raise ValueError(f'unexpected event content: {hit}')
             except queue.Empty:
                 if updated:
                     self._ball_last_seen = time.time()
                 return
 
+    def _recenter_to_field(self):
+        diff_z = 0 if math.fabs(self._position.z) < self.DEGREE_EPS else self._position.z
+        self._cmd.chassis_move(-self._position.x, -self._position.y, -diff_z, speed_xy=self.DEFAULT_XY_SPEED, speed_z=self.DEFAULT_Z_SPEED)
+
     def _watch(self):
-        pass
+        if self._ball_distances is None:
+            return
+        forward = self._ball_distances[0]
+        if forward < self.CHASE_ENTER_FORWARD_THRESHOLD:
+            self._next_state()
+
+    def _chase_kick_check(self) -> bool:
+        # hit events
+        if self._armor_hit_id is not None:
+            self._cmd.chassis_wheel(0, 0, 0, 0)
+
+            if self._armor_hit_id == 2:
+                if self._state == KeeperState.KICKING:
+                    time.sleep(self.SLEEP_SECONDS)
+                self._next_state()
+                return False
+
+            time.sleep(self.SLEEP_SECONDS)
+            self._reset_state()
+            return False
+
+        # timeout
+        now = time.time()
+        if now - self._ball_last_seen > self.BALL_ABSENT_TIMEOUT:
+            self._reset_state()
+            return False
+
+        # distances
+        forward, lateral, horizontal_degree = self._ball_distances
+        if forward > self.CHASE_EXIT_FORWARD_THRESHOLD:
+            self._reset_state()
+            return False
+
+        # position
+        if math.fabs(self._position.x) > self._max_x:
+            self._cmd.chassis_wheel(0, 0, 0, 0)
+            self._cmd.led_control(rm.LED_BOTTOM_FRONT, rm.LED_EFFECT_BLINK, 0, 0, 255)
+            self._cmd.led_control(rm.LED_BOTTOM_BACK, rm.LED_EFFECT_BLINK, 0, 0, 255)
+            return False
+
+        if self._position.y > self._max_y and lateral > self.DISTANCE_EPS:
+            self._cmd.chassis_wheel(0, 0, 0, 0)
+            self._cmd.led_control(rm.LED_BOTTOM_RIGHT, rm.LED_EFFECT_BLINK, 0, 0, 255)
+            return False
+        if self._position.y < -self._max_y and -lateral > self.DISTANCE_EPS:
+            self._cmd.chassis_wheel(0, 0, 0, 0)
+            self._cmd.led_control(rm.LED_BOTTOM_LEFT, rm.LED_EFFECT_BLINK, 0, 0, 255)
+            return False
+
+        return True
 
     def _chase(self):
-        pass
+        ok = self._chase_kick_check()
+        if not ok:
+            return
+
+        forward, lateral, horizontal_degree = self._ball_distances
+        # can not see ball now
+        if forward < 0.25:
+            self._cmd.chassis_wheel(0, 0, 0, 0)
+            return
+        vy = self._y_pid(lateral)
+        vy = 0 if math.fabs(vy) < 0.1 else vy
+        if vy != 0:
+            self._cmd.chassis_speed(y=vy)
+        else:
+            self._cmd.chassis_wheel(0, 0, 0, 0)
 
     def _kick(self):
+        ok = self._chase_kick_check()
+        if not ok:
+            return
+
+        now = time.time()
+        if now - self._ball_last_seen > self.KICK_TIMEOUT:
+            return
+
+        forward, lateral, horizontal_degree = self._ball_distances
+        vy = self._y_pid(lateral)
+        vy = 0 if math.fabs(vy) < 0.1 else vy
+        if vy != 0:
+            self._cmd.chassis_speed(x=self.DEFAULT_XY_SPEED, y=vy)
+        else:
+            self._cmd.chassis_speed(x=self.DEFAULT_XY_SPEED)
+
+    def _draw_graph(self):
         pass
 
     def _tick(self):
+        self._armor_hit_last_seen = None
+        self._armor_hit_id = None
+
         self._drain_push()
         self._drain_event()
         self._drain_vision()
-
-        now = time.time()
-        for index, last_seen in (self._position_last_seen, self._armor_hit_last_seen, self._ball_last_seen):
-            if last_seen is None:
-                continue
-            lapse = now - last_seen
-            if lapse > self.MAX_EVENT_LAPSE:
-                self.logger.warning('event out of sync, lapse %.3f second(s), index %d', lapse, index)
 
     def work(self) -> None:
         self._tick()

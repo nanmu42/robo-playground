@@ -22,7 +22,7 @@ def pinhole_distance(actual_size: float, pixel_size: float, focal_length: float 
     return focal_length * actual_size / pixel_size
 
 
-def distance_decomposition(pixel_x: float, distance: float, horizontal_pixels: float = HORIZONTAL_PIXELS, horizontal_degrees: float = HORIZONTAL_DEGREES) -> Tuple[float, float]:
+def distance_decomposition(pixel_x: float, distance: float, horizontal_pixels: float = HORIZONTAL_PIXELS, horizontal_degrees: float = HORIZONTAL_DEGREES) -> Tuple[float, float, float]:
     """
     将距离分解为前进分量（前为正）和侧向分量（右为正）。本函数要求线段的两端在相同海拔高度。
 
@@ -33,10 +33,10 @@ def distance_decomposition(pixel_x: float, distance: float, horizontal_pixels: f
     :param distance: 距离，单位米。 Distance in meter.
     :param horizontal_pixels: 图像横向的像素数目，默认1280. The number of pixels in the horizontal direction of the image, the default is 1280.
     :param horizontal_degrees: 图像横向的视角大小，默认96. The horizontal viewing angle of the image, the default is 96.
-    :return: 前进分量和侧向分量，单位米。 forward vector and lateral vector in meters.
+    :return: 前进分量和侧向分量，单位米；横向偏转角度，单位度。 forward vector and lateral vector in meters; horizontal angle in degrees.
     """
     horizontal_degree = HORIZONTAL_DEGREES * (pixel_x / horizontal_pixels - 0.5)
     rad = horizontal_degree / 180 * math.pi
     lateral = distance * math.sin(rad)
     forward = distance * math.cos(rad)
-    return forward, lateral
+    return forward, lateral, horizontal_degree
