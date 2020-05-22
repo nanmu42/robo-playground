@@ -757,7 +757,7 @@ class Worker:
 
 
 class Hub:
-    TERMINATION_TIMEOUT = 3
+    TERMINATION_TIMEOUT = 10
 
     def __init__(self):
         self._mu = CTX.Lock()
