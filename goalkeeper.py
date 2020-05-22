@@ -23,7 +23,6 @@ GREEN_LOWER = (29, 90, 90)
 GREEN_UPPER = (64, 255, 255)
 BALL_ACTUAL_RADIUS = 0.065 / 2
 
-QUEUE_TIMEOUT: float = 0.3
 QUEUE_SIZE: int = 6
 SYSTEM_FREQUENCY: int = 30
 
@@ -48,7 +47,7 @@ class KeeperState(enum.IntEnum):
 
 class KeeperMind(rm.Worker):
     MAX_EVENT_LAPSE: float = 20 / 1000.0  # in seconds
-    DEFAULT_XY_SPEED: float = 0.3
+    DEFAULT_XY_SPEED: float = 0.4
     DEFAULT_Z_SPEED: float = 60
     BALL_ABSENT_TIMEOUT: float = 3.0
     KICK_TIMEOUT: float = 1.0
@@ -69,7 +68,7 @@ class KeeperMind(rm.Worker):
         self._vision = vision
         self._push = push
         self._event = event
-        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.05, -0.5, setpoint=0, sample_time=1.0 / SYSTEM_FREQUENCY, output_limits=(-self.DEFAULT_XY_SPEED, self.DEFAULT_XY_SPEED))
+        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.5, -1, setpoint=0, sample_time=1.0 / SYSTEM_FREQUENCY, output_limits=(-self.DEFAULT_XY_SPEED, self.DEFAULT_XY_SPEED))
 
         if field_width > field_depth:
             self._graph_pixel_size: float = 0.8 * self.GRAPH_SIZE / field_width  # pixel per meter
