@@ -371,35 +371,17 @@ def vision(frame, logger: logging.Logger) -> Optional[Tuple[float, float, float]
     return forward, lateral, horizontal_degree
 
 
-@click.group()
+@click.command()
 @click.option('--ip', default='', type=str, help='(Optional) IP of Robomaster EP')
 @click.option('--timeout', default=10.0, type=float, help='(Optional) Timeout for commands')
 @click.option('--max-width', default=0.5, type=float, help='(Optional) Field width')
 @click.option('--max-depth', default=0.5, type=float, help='(Optional) Field depth')
-@click.pass_context
-def cli(ctx: click.Context, ip: str, timeout: float, max_width: float, max_depth: float):
-    ctx.ensure_object(dict)
-    ctx.obj['manager']: mp.managers.SyncManager = CTX.Manager()
-    ctx.obj['ip']: str = ip
-    ctx.obj['timeout']: float = timeout
-    ctx.obj['max_width']: float = max_width
-    ctx.obj['max_depth']: float = max_depth
-
-
-@cli.command()
-@click.pass_context
-def ensure_field(ctx: click.Context):
-    pass
-
-
-@cli.command()
-@click.pass_context
-def play(ctx: click.Context):
+def cli(ip: str, timeout: float, max_width: float, max_depth: float):
     manager: mp.managers.SyncManager = CTX.Manager()
 
     with manager:
         hub = rm.Hub()
-        cmd = rm.Commander(ip=ctx.obj['ip'], timeout=ctx.obj['timeout'])
+        cmd = rm.Commander(ip=ip, timeout=timeout)
         ip = cmd.get_ip()
 
         # queues
@@ -419,10 +401,10 @@ def play(ctx: click.Context):
         hub.worker(rm.EventListener, 'armor-event', (event_queue, ip))
 
         # controller
-        hub.worker(KeeperMind, 'keeper', (ip, vision_queue, push_queue, event_queue, ctx.obj['max_width'], ctx.obj['max_depth'], ctx.obj['timeout']))
+        hub.worker(KeeperMind, 'keeper', (ip, vision_queue, push_queue, event_queue, max_width, max_depth, timeout))
 
         hub.run()
 
 
 if __name__ == '__main__':
-    cli(obj={})
+    cli()
