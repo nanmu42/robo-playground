@@ -48,8 +48,8 @@ class KeeperState(enum.IntEnum):
 
 class KeeperMind(rm.Worker):
     MAX_EVENT_LAPSE: float = 20 / 1000.0  # in seconds
-    DEFAULT_XY_SPEED: float = 2.0
-    DEFAULT_Z_SPEED: float = 180.0
+    DEFAULT_XY_SPEED: float = 0.4
+    DEFAULT_Z_SPEED: float = 36.0
     BALL_ABSENT_TIMEOUT: float = 8.0
     KICK_TIMEOUT: float = 0.3
     CHASE_ENTER_FORWARD_THRESHOLD: float = 1.2
@@ -77,7 +77,7 @@ class KeeperMind(rm.Worker):
             self._graph_pixel_size: float = 0.8 * self.GRAPH_SIZE / field_depth  # pixel per meter
         self._graph_chassis_width = self._graph_pixel_size * measure.INFANTRY_WIDTH
         self._graph_chassis_length = self._graph_pixel_size * measure.INFANTRY_LENGTH
-        self._graph_ball_radius = BALL_ACTUAL_RADIUS * self._graph_pixel_size
+        self._graph_ball_radius = int(BALL_ACTUAL_RADIUS * self._graph_pixel_size)
         self._graph_base = np.zeros((self.GRAPH_SIZE, self.GRAPH_SIZE), dtype=np.uint8)
         cv.rectangle(self._graph_base, self._graph_offset(-0.8 * 0.5 * field_width, -0.8 * 0.5 * field_depth), self._graph_offset(0.8 * 0.5 * field_width, 0.8 * 0.5 * field_depth), (255, 0, 0), 4)
 
@@ -95,9 +95,9 @@ class KeeperMind(rm.Worker):
 
         self._init_state()
 
-    def _graph_offset(self, x: float, y: float) -> Tuple[float, float]:
+    def _graph_offset(self, x: float, y: float) -> Tuple[int, int]:
         center = 0.5 * self.GRAPH_SIZE
-        return center + x, center + y
+        return int(center + x), int(center + y)
 
     def close(self):
         self._cmd.close()
@@ -269,20 +269,20 @@ class KeeperMind(rm.Worker):
         chassis_y = -self._position.x
         chassis_x_pixel = chassis_x * self._graph_pixel_size
         chassis_y_pixel = chassis_y * self._graph_pixel_size
-        cv.rectangle(graph, (chassis_x_pixel - self._graph_chassis_width, chassis_y_pixel - self._graph_chassis_length), (chassis_x_pixel + self._graph_chassis_width, chassis_y_pixel + self._graph_chassis_length), (0, 0, 255), 2)
+        cv.rectangle(graph, (int(chassis_x_pixel - self._graph_chassis_width), int(chassis_y_pixel - self._graph_chassis_length)), (int(chassis_x_pixel + self._graph_chassis_width), int(chassis_y_pixel + self._graph_chassis_length)), (0, 0, 255), 2)
 
         forward, lateral, _ = self._ball_distances
-        ball_x_pixel = (lateral + chassis_x) * self._graph_pixel_size
-        ball_y_pixel = (chassis_y - forward) * self._graph_pixel_size
+        ball_x_pixel = int((lateral + chassis_x) * self._graph_pixel_size)
+        ball_y_pixel = int((chassis_y - forward) * self._graph_pixel_size)
 
         cv.circle(graph, (ball_x_pixel, ball_y_pixel), self._graph_ball_radius, (0, 255, 0), 2)
         cv.circle(graph, (ball_x_pixel, ball_y_pixel), 1, (0, 128, 128), 2)
-        cv.putText(graph, self._state.name, (20, 20), cv.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)
+        cv.putText(graph, self._state.name, (20, 20), cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
         now = time.time()
-        cv.putText(graph, 'vision heath: %.2f ms' % (now - self._ball_last_seen) * 1000 if self._ball_last_seen is not None else -1, (20, 70), cv.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
-        cv.putText(graph, 'position heath: %.2f ms' % (now - self._position_last_seen) * 1000 if self._ball_last_seen is not None else -1, (20, 120), cv.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
-        cv.putText(graph, 'hit last seen: %.2f ms' % (now - self._armor_hit_last_seen) * 1000 if self._ball_last_seen is not None else -1, (20, 70), cv.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
+        cv.putText(graph, 'vision heath: %.2f ms' % ((now - self._ball_last_seen) * 1000 if self._ball_last_seen is not None else -1.0), (20, 70), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv.putText(graph, 'position heath: %.2f ms' % ((now - self._position_last_seen) * 1000 if self._position_last_seen is not None else -1.0), (20, 120), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv.putText(graph, 'hit last seen: %.2f ms' % ((now - self._armor_hit_last_seen) * 1000 if self._armor_hit_last_seen is not None else -1.0), (20, 170), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         cv.imshow('graph', graph)
         cv.waitKey(1)
@@ -334,7 +334,7 @@ def biggest_circle_cnt(cnts: List):
     return found_cnt
 
 
-def vision(frame, logger: logging.Logger) -> Optional[Tuple[float, float]]:
+def vision(frame, logger: logging.Logger) -> Optional[Tuple[float, float, float]]:
     processed = cv.GaussianBlur(frame, (11, 11), 0)
     processed = cv.cvtColor(processed, cv.COLOR_BGR2HSV)
 
@@ -344,23 +344,23 @@ def vision(frame, logger: logging.Logger) -> Optional[Tuple[float, float]]:
 
     ball_cnt = biggest_circle_cnt(cnts)
     if ball_cnt is None:
-        cv.putText(frame, 'no ball detected', (50, 20), cv.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)
+        cv.putText(frame, 'no ball detected', (50, 20), cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         cv.imshow('vision', frame)
         cv.waitKey(1)
         return None
 
     (x, y), pixel_radius = cv.minEnclosingCircle(ball_cnt)
     distance = measure.pinhole_distance(BALL_ACTUAL_RADIUS, pixel_radius)
-    forward, lateral, _ = measure.distance_decomposition(x, distance)
-    cv.circle(frame, (x, y), pixel_radius, (0, 255, 0), 2)
-    cv.circle(frame, (x, y), 1, (0, 0, 255), 2)
-    cv.putText(frame, 'forward: %.1f cm' % forward * 100, (50, 20), cv.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)
-    cv.putText(frame, 'lateral: %.1f cm' % lateral * 100, (50, 70), cv.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)
+    forward, lateral, horizontal_degree = measure.distance_decomposition(x, distance)
+    cv.circle(frame, (int(x), int(y)), int(pixel_radius), (0, 255, 0), 2)
+    cv.circle(frame, (int(x), int(y)), 1, (0, 0, 255), 2)
+    cv.putText(frame, 'forward: %.1f cm' % (forward * 100), (50, 20), cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    cv.putText(frame, 'lateral: %.1f cm' % (lateral * 100), (50, 70), cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
     cv.imshow('vision', frame)
     cv.waitKey(1)
 
-    return forward, lateral
+    return forward, lateral, horizontal_degree
 
 
 @click.group()
