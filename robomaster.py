@@ -990,15 +990,17 @@ class EventListener(Worker):
 class Vision(Worker):
     TIMEOUT: float = 5.0
 
-    def __init__(self, name: str, out: Optional[mp.Queue], ip: str, processing: Callable[..., None]):
+    def __init__(self, name: str, out: Optional[mp.Queue], ip: str, processing: Callable[..., None], none_is_valid=False):
         super().__init__(name, out, None, (ip, VIDEO_PORT), self.TIMEOUT)
+        self._none_is_valid = none_is_valid
         self._processing = processing
         self._cap = cv.VideoCapture(f'tcp://{ip}:{VIDEO_PORT}')
         assert self._cap.isOpened(), 'failed to connect to video stream'
-        self._cap.set(cv.CAP_PROP_BUFFERSIZE, 6)
+        self._cap.set(cv.CAP_PROP_BUFFERSIZE, 4)
 
     def close(self):
         self._cap.release()
+        cv.destroyAllWindows()
         super().close()
 
     def work(self) -> None:
@@ -1009,7 +1011,7 @@ class Vision(Worker):
             else:
                 raise ValueError('can not receive frame (stream end?)')
         processed = self._processing(frame=frame, logger=self.logger)
-        if processed is not None:
+        if processed is not None or self._none_is_valid:
             self._outlet(processed)
 
 
