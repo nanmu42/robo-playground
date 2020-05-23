@@ -47,8 +47,6 @@ class KeeperState(enum.IntEnum):
 
 class KeeperMind(rm.Worker):
     MAX_EVENT_LAPSE: float = 20 / 1000.0  # in seconds
-    DEFAULT_XY_SPEED: float = 0.4
-    DEFAULT_Z_SPEED: float = 60
     BALL_ABSENT_TIMEOUT: float = 3.0
     KICK_TIMEOUT: float = 1.0
     CHASE_ENTER_FORWARD_THRESHOLD: float = 1.2
@@ -60,15 +58,18 @@ class KeeperMind(rm.Worker):
 
     def __init__(self, name: str, ip: str,
                  vision: mp.Queue, push: mp.Queue, event: mp.Queue,
-                 field_width: float, field_depth: float, timeout: float = 10):
+                 field_width: float, field_depth: float, timeout: float = 10,
+                 xy_speed: float = 0.4, z_speed: float = 60):
         super().__init__(name, None, None, (ip, 0), timeout, True)
+        self._z_speed = z_speed
+        self._xy_speed = xy_speed
         self._state: KeeperState = KeeperState.WATCHING
         self._max_y = field_width / 2.0
         self._max_x = field_depth / 2.0
         self._vision = vision
         self._push = push
         self._event = event
-        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.5, -1, setpoint=0, sample_time=1.0 / SYSTEM_FREQUENCY, output_limits=(-self.DEFAULT_XY_SPEED, self.DEFAULT_XY_SPEED))
+        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.1, -0.5, setpoint=0, sample_time=1.0 / SYSTEM_FREQUENCY, output_limits=(-self._xy_speed, self._xy_speed))
 
         if field_width > field_depth:
             self._graph_pixel_size: float = 0.8 * self.GRAPH_SIZE / field_width  # pixel per meter
@@ -123,7 +124,7 @@ class KeeperMind(rm.Worker):
             self._y_pid.reset()
             self._cmd.led_control(rm.LED_ALL, rm.LED_EFFECT_SOLID, 0, 0, 255)
         elif self._state == KeeperState.KICKING:
-            self._cmd.chassis_move(-self._max_x * 2 / 3, speed_xy=self.DEFAULT_XY_SPEED)
+            self._cmd.chassis_move(-self._max_x * 2 / 3, speed_xy=self._xy_speed)
             self._cmd.led_control(rm.LED_ALL, rm.LED_EFFECT_SOLID, 255, 255, 255)
         else:
             raise ValueError(f'unknown state {self._state}')
@@ -177,7 +178,7 @@ class KeeperMind(rm.Worker):
         diff_y = 0 if math.fabs(self._position.y) < self.DISTANCE_EPS else self._position.y
         diff_z = 0 if math.fabs(self._position.z) < self.DEGREE_EPS else self._position.z
         if any((diff_x, diff_y, diff_z)):
-            self._cmd.chassis_move(-self._position.x, -self._position.y, -diff_z, speed_xy=self.DEFAULT_XY_SPEED, speed_z=self.DEFAULT_Z_SPEED)
+            self._cmd.chassis_move(-self._position.x, -self._position.y, -diff_z, speed_xy=self._xy_speed, speed_z=self._z_speed)
 
     def _watch(self):
         now = time.time()
@@ -264,9 +265,9 @@ class KeeperMind(rm.Worker):
         vy = self._y_pid(lateral)
         vy = 0 if math.fabs(vy) < 0.1 else vy
         if vy != 0:
-            self._cmd.chassis_speed(x=self.DEFAULT_XY_SPEED, y=vy)
+            self._cmd.chassis_speed(x=self._xy_speed, y=vy)
         else:
-            self._cmd.chassis_speed(x=self.DEFAULT_XY_SPEED)
+            self._cmd.chassis_speed(x=self._xy_speed)
 
     def _draw_graph(self):
         if self._ball_distances is None:
@@ -376,7 +377,9 @@ def vision(frame, logger: logging.Logger) -> Optional[Tuple[float, float, float]
 @click.option('--timeout', default=10.0, type=float, help='(Optional) Timeout for commands')
 @click.option('--max-width', default=0.5, type=float, help='(Optional) Field width')
 @click.option('--max-depth', default=0.5, type=float, help='(Optional) Field depth')
-def cli(ip: str, timeout: float, max_width: float, max_depth: float):
+@click.option('--xy-speed', default=0.4, type=float, help='(Optional) Speed in x and y direction')
+@click.option('--z-speed', default=60, type=float, help='(Optional) Speed in z direction(chassis roll)')
+def cli(ip: str, timeout: float, max_width: float, max_depth: float, xy_speed: float, z_speed: float):
     manager: mp.managers.SyncManager = CTX.Manager()
 
     with manager:
@@ -401,7 +404,14 @@ def cli(ip: str, timeout: float, max_width: float, max_depth: float):
         hub.worker(rm.EventListener, 'armor-event', (event_queue, ip))
 
         # controller
-        hub.worker(KeeperMind, 'keeper', (ip, vision_queue, push_queue, event_queue, max_width, max_depth, timeout))
+        hub.worker(KeeperMind, 'controller',
+                   (ip, vision_queue, push_queue, event_queue, max_width, max_depth),
+                   {
+                       'timeout': timeout,
+                       'xy_speed': xy_speed,
+                       'z_speed': z_speed,
+                   },
+                   )
 
         hub.run()
 
