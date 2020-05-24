@@ -11,7 +11,7 @@
 
 ![RoboMasterPy 机甲大师守门员](https://user-images.githubusercontent.com/8143068/82755582-186d5700-9e07-11ea-9c08-1ff1d82e7a7e.jpg)
 
-## Run
+## 开始游戏
 
 RoboMasterPy Playground 需要 Python 3.6 或更高以运行。
 
