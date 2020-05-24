@@ -22,6 +22,7 @@ TIMEOUT_UNIT: float = 0.1
 QUEUE_TIMEOUT: float = TIMEOUT_UNIT / PUSH_FREQUENCY
 
 
+# just display the streaming video
 def display(frame, **kwargs) -> None:
     cv.imshow("frame", frame)
     cv.waitKey(1)
@@ -151,38 +152,49 @@ def control(cmd: rm.Commander, logger: logging.Logger, **kwargs) -> None:
 @click.option('--ip', default='', type=str, help='(Optional) IP of Robomaster EP')
 @click.option('--timeout', default=10.0, type=float, help='(Optional) Timeout for commands')
 def cli(ip: str, timeout: float):
+    # manager is in charge of communicating among processes
     manager: mp.managers.SyncManager = CTX.Manager()
 
     with manager:
+        # hub is the place to register your logic
         hub = rm.Hub()
         cmd = rm.Commander(ip=ip, timeout=timeout)
         ip = cmd.get_ip()
 
-        # reset
+        # initialize your Robomaster
         cmd.robot_mode(rm.MODE_GIMBAL_LEAD)
         cmd.gimbal_recenter()
 
-        # vision
+        # enable video streaming
         cmd.stream(True)
+        # rm.Vision is a handler for video streaming
+        # display is the callback function defined above
         hub.worker(rm.Vision, 'vision', (None, ip, display))
 
-        # push and event
+        # enable push and event
         cmd.chassis_push_on(PUSH_FREQUENCY, PUSH_FREQUENCY, PUSH_FREQUENCY)
         cmd.gimbal_push_on(PUSH_FREQUENCY)
         cmd.armor_sensitivity(10)
         cmd.armor_event(rm.ARMOR_HIT, True)
         cmd.sound_event(rm.SOUND_APPLAUSE, True)
+
+        # the queues are where data flows
         push_queue = manager.Queue(QUEUE_SIZE)
         event_queue = manager.Queue(QUEUE_SIZE)
+
+        # PushListener and EventListener handles push and event,
+        # put parsed, well-defined data into queues.
         hub.worker(rm.PushListener, 'push', (push_queue,))
         hub.worker(rm.EventListener, 'event', (event_queue, ip))
 
-        # push and event handler
+        # Mind is the handler to let you bring your own controlling logic.
+        # It can consume data from specified queues.
         hub.worker(rm.Mind, 'event-handler', ((push_queue, event_queue), ip, handle_event))
 
-        # controller
+        # a hub can have multiple Mind
         hub.worker(rm.Mind, 'controller', ((), ip, control), {'loop': False})
 
+        # Let's do this!
         hub.run()
 
 
