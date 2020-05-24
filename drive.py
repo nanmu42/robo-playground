@@ -7,11 +7,11 @@ from typing import Tuple, List
 
 import click
 import cv2 as cv
+import robomasterpy as rm
 from pynput import keyboard
 from pynput.keyboard import Key, KeyCode
-
-import robomaster as rm
-from robomaster import CTX
+from robomasterpy import CTX
+from robomasterpy import framework as rmf
 
 rm.LOG_LEVEL = logging.INFO
 pickle.DEFAULT_PROTOCOL = pickle.HIGHEST_PROTOCOL
@@ -157,7 +157,7 @@ def cli(ip: str, timeout: float):
 
     with manager:
         # hub is the place to register your logic
-        hub = rm.Hub()
+        hub = rmf.Hub()
         cmd = rm.Commander(ip=ip, timeout=timeout)
         ip = cmd.get_ip()
 
@@ -169,7 +169,7 @@ def cli(ip: str, timeout: float):
         cmd.stream(True)
         # rm.Vision is a handler for video streaming
         # display is the callback function defined above
-        hub.worker(rm.Vision, 'vision', (None, ip, display))
+        hub.worker(rmf.Vision, 'vision', (None, ip, display))
 
         # enable push and event
         cmd.chassis_push_on(PUSH_FREQUENCY, PUSH_FREQUENCY, PUSH_FREQUENCY)
@@ -184,15 +184,15 @@ def cli(ip: str, timeout: float):
 
         # PushListener and EventListener handles push and event,
         # put parsed, well-defined data into queues.
-        hub.worker(rm.PushListener, 'push', (push_queue,))
-        hub.worker(rm.EventListener, 'event', (event_queue, ip))
+        hub.worker(rmf.PushListener, 'push', (push_queue,))
+        hub.worker(rmf.EventListener, 'event', (event_queue, ip))
 
         # Mind is the handler to let you bring your own controlling logic.
         # It can consume data from specified queues.
-        hub.worker(rm.Mind, 'event-handler', ((push_queue, event_queue), ip, handle_event))
+        hub.worker(rmf.Mind, 'event-handler', ((push_queue, event_queue), ip, handle_event))
 
         # a hub can have multiple Mind
-        hub.worker(rm.Mind, 'controller', ((), ip, control), {'loop': False})
+        hub.worker(rmf.Mind, 'controller', ((), ip, control), {'loop': False})
 
         # Let's do this!
         hub.run()

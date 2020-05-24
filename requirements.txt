@@ -1,0 +1,8 @@
+click==7.1.2
+numpy==1.18.4
+opencv-contrib-python==4.2.0.34
+pynput==1.6.8
+python-xlib==0.27
+robomasterpy==0.1.0
+simple-pid==0.2.4
+six==1.15.0

@@ -10,11 +10,11 @@ from typing import Tuple, List, Optional
 import click
 import cv2 as cv
 import numpy as np
+import robomasterpy as rm
 import simple_pid
-
-import measure
-import robomaster as rm
-from robomaster import CTX
+from robomasterpy import CTX
+from robomasterpy import framework as rmf
+from robomasterpy import measure
 
 rm.LOG_LEVEL = logging.DEBUG
 pickle.DEFAULT_PROTOCOL = pickle.HIGHEST_PROTOCOL
@@ -45,7 +45,8 @@ class KeeperState(enum.IntEnum):
         return KeeperState(self._BEGIN + 1)
 
 
-class KeeperMind(rm.Worker):
+# Build our own worker for complex task
+class KeeperMind(rmf.Worker):
     MAX_EVENT_LAPSE: float = 20 / 1000.0  # in seconds
     BALL_ABSENT_TIMEOUT: float = 3.0
     KICK_TIMEOUT: float = 1.0
@@ -383,7 +384,7 @@ def cli(ip: str, timeout: float, max_width: float, max_depth: float, xy_speed: f
     manager: mp.managers.SyncManager = CTX.Manager()
 
     with manager:
-        hub = rm.Hub()
+        hub = rmf.Hub()
         cmd = rm.Commander(ip=ip, timeout=timeout)
         ip = cmd.get_ip()
 
@@ -394,14 +395,14 @@ def cli(ip: str, timeout: float, max_width: float, max_depth: float, xy_speed: f
 
         # vision
         cmd.stream(True)
-        hub.worker(rm.Vision, 'vision', (vision_queue, ip, vision), {'none_is_valid': True})
+        hub.worker(rmf.Vision, 'vision', (vision_queue, ip, vision), {'none_is_valid': True})
 
         # push and event
         cmd.chassis_push_on(position_freq=SYSTEM_FREQUENCY, attitude_freq=SYSTEM_FREQUENCY)
         cmd.armor_sensitivity(10)
         cmd.armor_event(rm.ARMOR_HIT, True)
-        hub.worker(rm.PushListener, 'chassis-push', (push_queue,))
-        hub.worker(rm.EventListener, 'armor-event', (event_queue, ip))
+        hub.worker(rmf.PushListener, 'chassis-push', (push_queue,))
+        hub.worker(rmf.EventListener, 'armor-event', (event_queue, ip))
 
         # controller
         hub.worker(KeeperMind, 'controller',
