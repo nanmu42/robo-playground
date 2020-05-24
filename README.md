@@ -11,7 +11,7 @@ Games and examples built for [RoboMaster EP](https://en.wikipedia.org/wiki/RoboM
 
 ![RoboMasterPy Goalkeeper](https://user-images.githubusercontent.com/8143068/82755582-186d5700-9e07-11ea-9c08-1ff1d82e7a7e.jpg)
 
-## Run
+## 开始游戏
 
 RoboMasterPy Playground requires Python 3.6 and above.
 
