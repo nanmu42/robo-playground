@@ -1,6 +1,6 @@
 # RoboMasterPy Playground
 
-[English]((https://github.com/nanmu42/robo-playground/blob/master/README.md)) | **中文**
+[English](https://github.com/nanmu42/robo-playground/blob/master/README.md) | **中文**
 
 [![Documentation Status](https://readthedocs.org/projects/robomasterpy/badge/?version=latest)](https://robomasterpy.nanmu.me/en/latest/?badge=latest)
 [![](https://img.shields.io/pypi/l/robomasterpy.svg)](https://pypi.org/project/robomasterpy/)
