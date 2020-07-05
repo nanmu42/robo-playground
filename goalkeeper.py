@@ -70,7 +70,7 @@ class KeeperMind(rmf.Worker):
         self._vision = vision
         self._push = push
         self._event = event
-        self._y_pid: simple_pid.PID = simple_pid.PID(-10, -0.1, -0.5, setpoint=0, sample_time=1.0 / SYSTEM_FREQUENCY, output_limits=(-self._xy_speed, self._xy_speed))
+        self._y_pid: simple_pid.PID = simple_pid.PID(-50, -0.5, -2.5, setpoint=0, sample_time=1.0 / SYSTEM_FREQUENCY, output_limits=(-self._xy_speed, self._xy_speed))
 
         if field_width > field_depth:
             self._graph_pixel_size: float = 0.8 * self.GRAPH_SIZE / field_width  # pixel per meter
