@@ -49,6 +49,8 @@ Options:
 
 ### 让你的机甲大师EP变身为守门员
 
+我写了一篇博客，里面介绍了守门员的实现：https://nanmu.me/zh-cn/posts/2020/build-a-goalkeeper-robomaster/
+
 你需要根据光照环境调整`GREEN_LOWER`和`GREEN_UPPER`以获得最佳体验。默认值在自然光阴影下工作良好。
 
 ```bash
@@ -91,5 +93,4 @@ RoboMasterPy Playground 是在机甲大师EP开发者比赛中孵化的，作者
 
 ## 许可
 
-RoboMasterPy 基于MIT许可发布，
-您只需要保留署名和版权信息（LICENSE）即可自由使用本软件。
+RoboMasterPy 基于MIT许可发布， 您只需要保留署名和版权信息（LICENSE）即可自由使用本软件。

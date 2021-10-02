@@ -7,7 +7,8 @@
 [![](https://img.shields.io/pypi/wheel/robomasterpy.svg)](https://pypi.org/project/robomasterpy/)
 [![](https://img.shields.io/pypi/pyversions/robomasterpy.svg)](https://pypi.org/project/robomasterpy/)
 
-Games and examples built for [RoboMaster EP](https://en.wikipedia.org/wiki/RoboMaster#RoboMaster_EP) with [RoboMasterPy](https://github.com/nanmu42/robomasterpy).
+Games and examples built for [RoboMaster EP](https://en.wikipedia.org/wiki/RoboMaster#RoboMaster_EP)
+with [RoboMasterPy](https://github.com/nanmu42/robomasterpy).
 
 ![RoboMasterPy Goalkeeper](https://user-images.githubusercontent.com/8143068/82755582-186d5700-9e07-11ea-9c08-1ff1d82e7a7e.jpg)
 
@@ -49,7 +50,11 @@ Key bindings:
 
 ### Make your robomaster a goalkeeper
 
-You need tweak `GREEN_LOWER` and `GREEN_UPPER` per your luminance to get good experience. The default values works okay under daylight shade.
+There is a blog post explaining Goalkeeper's
+implementation: https://nanmu.me/en/posts/2020/build-a-goalkeeper-robomaster/
+
+You need tweak `GREEN_LOWER` and `GREEN_UPPER` per your luminance to get good experience. The default values works okay
+under daylight shade.
 
 ```bash
 $ python goalkeeper.py --help
@@ -87,7 +92,8 @@ DJI, RoboMaster are trademarks of SZ DJI Technology Co., Ltd.
 
 ## Acknowledgement
 
-RoboMasterPy Playground was incubated during a RoboMaster EP developing contest. The author would like to thank DJI for hardware and technical support.
+RoboMasterPy Playground was incubated during a RoboMaster EP developing contest. The author would like to thank DJI for
+hardware and technical support.
 
 ## License
 
