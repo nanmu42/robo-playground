@@ -1,6 +1,6 @@
 click==7.1.2
 dataclasses==0.7
-numpy==1.18.4
+numpy==1.22.0
 opencv-contrib-python==4.2.0.34
 pynput==1.6.8
 python-xlib==0.27
