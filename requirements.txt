@@ -1,6 +1,6 @@
 click==7.1.2
 numpy==1.22.0
-opencv-contrib-python==4.2.0.34
+opencv-contrib-python==4.8.1.78
 pynput==1.6.8
 python-xlib==0.27
 robomasterpy==0.1.1
